@@ -44,20 +44,25 @@ target_link_libraries(quad_vbo PUBLIC CompGraphLib)
 # Sample 4: Quad avec VAO et VBO+EBO
  add_executable(quad_ebo main/main_quad_ebo.cc
          main/main_quad_texture_stb.cc
-         main/shader.cc)
+         main/shader.cc
+         main/main_sample_cube.cc)
  target_link_libraries(quad_ebo PUBLIC CompGraphLib)
 
 # Sample 5: Quad avec Uniform
  add_executable(quad_uniform main/main_quad_uniform.cc)
  target_link_libraries(quad_uniform PUBLIC CompGraphLib)
 
-# Sample 6: Quad avec Texture
+# Sample 6: Quad avec Texture rotation
  add_executable(quad_texture main/main_quad_texture.cc)
  target_link_libraries(quad_texture PUBLIC CompGraphLib)
 
-# Sample 7: Quad avec Texture stb
+# Sample 7: Quad avec Texture stb no rotation
 add_executable(quad_texture_stb main/main_quad_texture_stb.cc)
 target_link_libraries(quad_texture PUBLIC CompGraphLib)
+
+# Sample 8: Cube avec Texture rotation
+add_executable(cube_texture main/main_sample_cube.cc)
+target_link_libraries(cube_texture PUBLIC CompGraphLib)
 
 # Option 2: Boucle automatique pour les autres fichiers main (sauf ceux déjà créés)
 
