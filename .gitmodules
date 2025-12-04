@@ -1,0 +1,3 @@
+[submodule "externals/GPR924-Engine"]
+	path = externals/GPR924-Engine
+	url = https://github.com/SAE-Geneve/GPR924-Engine.git

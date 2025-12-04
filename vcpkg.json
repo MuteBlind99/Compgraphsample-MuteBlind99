@@ -1,0 +1,34 @@
+{
+  "name": "gpr924-compgraph",
+
+  "version-string": "1.0.0",
+  "dependencies": [
+    "stb",
+    "fmt",
+    {
+      "name": "sdl3",
+      "platform": "!emscripten"
+    },
+    {
+      "name": "glew",
+      "platform": "!emscripten"
+    },
+    {
+      "name": "imgui",
+      "features": [
+        "sdl3-binding",
+        "opengl3-binding",
+        "sdl3-renderer-binding"
+      ]
+    }
+  ],
+  "features": {
+    "profiling": {
+      "description": "Profiling",
+      "dependencies": [
+        "tracy"
+      ]
+    }
+  },
+  "builtin-baseline": "29ff5b8131d0c6c8fcb8fbaef35992f0d507cd7c"
+}
