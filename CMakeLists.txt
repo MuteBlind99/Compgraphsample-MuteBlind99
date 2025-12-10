@@ -75,7 +75,8 @@ target_link_libraries(cube_lighting_maps PUBLIC CompGraphLib)
 
 # Sample 12: Cubes rotation with directional light
 add_executable(cube_directional_light main/main_directional_light.cc
-        main/main_flash_light.cc)
+        main/main_flash_light.cc
+        main/main_spot_light.cc)
 target_link_libraries(cube_directional_light PUBLIC CompGraphLib)
 
 # Sample 13: Cubes rotation with point light attenuation
@@ -83,8 +84,12 @@ add_executable(cube_point_light_attenuation main/main_point_light_attenuation.cc
 target_link_libraries(cube_point_light_attenuation PUBLIC CompGraphLib)
 
 # Sample 14: Cubes rotation with flash light
-add_executable(cube_point_light_attenuation main/main_point_light_attenuation.cc)
-target_link_libraries(cube_point_light_attenuation PUBLIC CompGraphLib)
+add_executable(cube_flash_light main/main_flash_light.cc)
+target_link_libraries(cube_flash_light PUBLIC CompGraphLib)
+
+# Sample 15: Cubes rotation with spot light
+add_executable(cube_spot_light main/main_spot_light.cc)
+target_link_libraries(cube_spot_light PUBLIC CompGraphLib)
 
 # Option 2: Boucle automatique pour les autres fichiers main (sauf ceux déjà créés)
 

@@ -21,7 +21,7 @@
 #include "engine/system.h"
 #include "third_party/gl_include.h"
 
-class FlashLightCubes : public common::DrawInterface, public common::SystemInterface {
+class SpotLightCubes : public common::DrawInterface, public common::SystemInterface {
 public:
     struct CubeInstance {
         float position[3];        // Position dans le monde
@@ -35,7 +35,7 @@ public:
     };
 
     void Begin() override {
-        std::cout << "FlashLightCubes::Begin() - Étape 5: Flash Light" << std::endl;
+        std::cout << "SpotLightCubes::Begin() - Étape 6: Spot Light" << std::endl;
         initGL();
         createInstances();
     }
@@ -55,65 +55,115 @@ public:
             cube.rotationAngleZ = fmodf(cube.rotationAngleZ, 360.0f);
         }
 
-        // Animation de la caméra (flash light suit la caméra)
-        cameraAngle += cameraRotationSpeed * dt;
-        if (cameraAngle > 360.0f) cameraAngle -= 360.0f;
+        // ==================== ANIMATION DES SPOT LIGHTS ====================
 
-        // Position de la caméra (déplacement circulaire)
-        cameraPos[0] = cameraRadius * sinf(cameraAngle * M_PI / 180.0f);
-        cameraPos[1] = cameraHeight;
-        cameraPos[2] = cameraRadius * cosf(cameraAngle * M_PI / 180.0f);
+        // Spot Light 1: Projecteur qui tourne autour de la scène
+        spotLight1Angle += 15.0f * dt;
+        if (spotLight1Angle > 360.0f) spotLight1Angle -= 360.0f;
 
-        // Direction de la caméra (regarde vers le centre)
-        cameraFront[0] = -cameraPos[0];
-        cameraFront[1] = -cameraPos[1];
-        cameraFront[2] = -cameraPos[2];
+        // Position circulaire
+        spotLight1Pos[0] = 5.0f * sinf(spotLight1Angle * M_PI / 180.0f);
+        spotLight1Pos[1] = 4.0f;  // En hauteur
+        spotLight1Pos[2] = 5.0f * cosf(spotLight1Angle * M_PI / 180.0f);
+
+        // Dirige vers le centre de la scène
+        spotLight1Dir[0] = -spotLight1Pos[0];
+        spotLight1Dir[1] = -spotLight1Pos[1] + 1.0f;  // Un peu vers le bas
+        spotLight1Dir[2] = -spotLight1Pos[2];
 
         // Normaliser la direction
-        float length = sqrtf(cameraFront[0]*cameraFront[0] +
-                           cameraFront[1]*cameraFront[1] +
-                           cameraFront[2]*cameraFront[2]);
-        if (length > 0.0f) {
-            cameraFront[0] /= length;
-            cameraFront[1] /= length;
-            cameraFront[2] /= length;
-        }
+        normalizeVector(spotLight1Dir);
 
-        // Mettre à jour la position et direction de la flash light
-        // La flash light est attachée à la caméra
-        flashLightPos[0] = cameraPos[0];
-        flashLightPos[1] = cameraPos[1];
-        flashLightPos[2] = cameraPos[2];
+        // Animation de la couleur
+        spotLight1Color[0] = 0.8f + 0.2f * sinf(time * 1.5f);
+        spotLight1Color[1] = 0.6f + 0.4f * sinf(time * 2.0f);
+        spotLight1Color[2] = 0.7f + 0.3f * sinf(time * 1.0f);
 
-        // La flash light pointe dans la même direction que la caméra
-        flashLightDir[0] = cameraFront[0];
-        flashLightDir[1] = cameraFront[1];
-        flashLightDir[2] = cameraFront[2];
+        // Spot Light 2: Projecteur fixe avec mouvement de balayage
+        spotLight2Angle += 25.0f * dt;
+        if (spotLight2Angle > 360.0f) spotLight2Angle -= 360.0f;
 
-        // Animation des paramètres de la flash light
-        flashLightAngle += 0.5f * dt;
+        // Position fixe en hauteur
+        spotLight2Pos[0] = -6.0f;
+        spotLight2Pos[1] = 5.0f;
+        spotLight2Pos[2] = 0.0f;
 
-        // Faire varier l'angle du cône pour effet de "scintillement"
-        flashLightCutOff = 12.5f + 2.5f * sinf(flashLightAngle * 3.0f);
-        flashLightOuterCutOff = 17.5f + 2.5f * sinf(flashLightAngle * 2.0f);
+        // Direction qui balaie de gauche à droite
+        spotLight2Dir[0] = cosf(spotLight2Angle * M_PI / 180.0f);
+        spotLight2Dir[1] = -0.5f;  // Un peu vers le bas
+        spotLight2Dir[2] = sinf(spotLight2Angle * M_PI / 180.0f);
 
-        // Faire varier l'intensité
-        flashLightIntensity = 0.8f + 0.2f * sinf(flashLightAngle * 5.0f);
+        normalizeVector(spotLight2Dir);
+
+        // Couleur fixe (blanc bleuté)
+        spotLight2Color[0] = 0.7f;
+        spotLight2Color[1] = 0.8f;
+        spotLight2Color[2] = 1.0f;
+
+        // Spot Light 3: Projecteur au sol qui éclaire vers le haut
+        spotLight3Angle += 10.0f * dt;
+        if (spotLight3Angle > 360.0f) spotLight3Angle -= 360.0f;
+
+        // Position au sol
+        spotLight3Pos[0] = 0.0f;
+        spotLight3Pos[1] = 0.5f;
+        spotLight3Pos[2] = 6.0f;
+
+        // Direction qui tourne vers le haut
+        spotLight3Dir[0] = sinf(spotLight3Angle * M_PI / 180.0f) * 0.3f;
+        spotLight3Dir[1] = 1.0f;  // Principalement vers le haut
+        spotLight3Dir[2] = cosf(spotLight3Angle * M_PI / 180.0f) * 0.3f;
+
+        normalizeVector(spotLight3Dir);
+
+        // Couleur chaude (jaune/orange)
+        spotLight3Color[0] = 1.0f;
+        spotLight3Color[1] = 0.6f + 0.2f * sinf(time * 3.0f);
+        spotLight3Color[2] = 0.2f;
+
+        // Animation des angles des cônes (pour effet visuel)
+        spotLight1CutOff = 10.0f + 2.0f * sinf(time * 2.0f);
+        spotLight1OuterCutOff = spotLight1CutOff + 5.0f;
+
+        spotLight2CutOff = 8.0f;
+        spotLight2OuterCutOff = 15.0f;
+
+        spotLight3CutOff = 15.0f;
+        spotLight3OuterCutOff = 25.0f;
+
+        // Animation de la caméra
+        cameraAngle += 8.0f * dt;
+        if (cameraAngle > 360.0f) cameraAngle -= 360.0f;
+
+        cameraPos[0] = 12.0f * sinf(cameraAngle * M_PI / 180.0f);
+        cameraPos[1] = 6.0f;
+        cameraPos[2] = 12.0f * cosf(cameraAngle * M_PI / 180.0f);
 
         // Affichage périodique des informations
         static float infoTimer = 0.0f;
         infoTimer += dt;
-        if (infoTimer >= 2.5f) {
+        if (infoTimer >= 3.0f) {
             infoTimer = 0.0f;
 
-            std::cout << "=== FLASH LIGHT INFO ===" << std::endl;
-            std::cout << "Camera Position: [" << cameraPos[0] << ", "
-                      << cameraPos[1] << ", " << cameraPos[2] << "]" << std::endl;
-            std::cout << "Flash Light Direction: [" << flashLightDir[0] << ", "
-                      << flashLightDir[1] << ", " << flashLightDir[2] << "]" << std::endl;
-            std::cout << "CutOff: " << flashLightCutOff << "°" << std::endl;
-            std::cout << "Outer CutOff: " << flashLightOuterCutOff << "°" << std::endl;
-            std::cout << "Intensity: " << flashLightIntensity << std::endl;
+            std::cout << "=== SPOT LIGHTS INFO ===" << std::endl;
+            std::cout << "Spot Light 1 (Tournante):" << std::endl;
+            std::cout << "  Position: [" << spotLight1Pos[0] << ", "
+                      << spotLight1Pos[1] << ", " << spotLight1Pos[2] << "]" << std::endl;
+            std::cout << "  Direction: [" << spotLight1Dir[0] << ", "
+                      << spotLight1Dir[1] << ", " << spotLight1Dir[2] << "]" << std::endl;
+            std::cout << "  Cône: " << spotLight1CutOff << "° / " << spotLight1OuterCutOff << "°" << std::endl;
+
+            std::cout << "\nSpot Light 2 (Balançante):" << std::endl;
+            std::cout << "  Position: [" << spotLight2Pos[0] << ", "
+                      << spotLight2Pos[1] << ", " << spotLight2Pos[2] << "]" << std::endl;
+            std::cout << "  Direction: [" << spotLight2Dir[0] << ", "
+                      << spotLight2Dir[1] << ", " << spotLight2Dir[2] << "]" << std::endl;
+
+            std::cout << "\nSpot Light 3 (Sol):" << std::endl;
+            std::cout << "  Position: [" << spotLight3Pos[0] << ", "
+                      << spotLight3Pos[1] << ", " << spotLight3Pos[2] << "]" << std::endl;
+            std::cout << "  Direction: [" << spotLight3Dir[0] << ", "
+                      << spotLight3Dir[1] << ", " << spotLight3Dir[2] << "]" << std::endl;
             std::cout << "========================" << std::endl;
         }
     }
@@ -121,7 +171,7 @@ public:
     void FixedUpdate() override {}
 
     void End() override {
-        std::cout << "FlashLightCubes::End()" << std::endl;
+        std::cout << "SpotLightCubes::End()" << std::endl;
         cleanup();
     }
 
@@ -142,7 +192,7 @@ public:
         glBindTexture(GL_TEXTURE_2D, specularMap);
         glUniform1i(specularMapUniformLoc, 1);
 
-        // Calculer et passer les matrices (vue depuis la caméra)
+        // Calculer et passer les matrices
         updateViewProjectionMatrices();
 
         // Passer les matrices au shader
@@ -150,21 +200,36 @@ public:
         glUniformMatrix4fv(projectionMatrixUniformLoc, 1, GL_FALSE, projectionMatrix);
         glUniform1f(timeUniformLoc, time);
 
-        // Passer la position de la caméra (pour les calculs d'éclairage)
+        // Passer la position de la caméra
         glUniform3fv(viewPosUniformLoc, 1, cameraPos);
 
-        // Passer les propriétés de la FLASH LIGHT
-        glUniform3fv(flashLightPosUniformLoc, 1, flashLightPos);
-        glUniform3fv(flashLightDirUniformLoc, 1, flashLightDir);
-        glUniform3fv(flashLightColorUniformLoc, 1, flashLightColor);
-        glUniform1f(flashLightCutOffUniformLoc, cosf(flashLightCutOff * M_PI / 180.0f));
-        glUniform1f(flashLightOuterCutOffUniformLoc, cosf(flashLightOuterCutOff * M_PI / 180.0f));
-        glUniform1f(flashLightIntensityUniformLoc, flashLightIntensity);
+        // ==================== PASSER LES 3 SPOT LIGHTS ====================
 
-        // Passer les coefficients d'atténuation
-        glUniform1f(flashLightConstantUniformLoc, flashLightConstant);
-        glUniform1f(flashLightLinearUniformLoc, flashLightLinear);
-        glUniform1f(flashLightQuadraticUniformLoc, flashLightQuadratic);
+        // Spot Light 1
+        glUniform3fv(spotLight1PosUniformLoc, 1, spotLight1Pos);
+        glUniform3fv(spotLight1DirUniformLoc, 1, spotLight1Dir);
+        glUniform3fv(spotLight1ColorUniformLoc, 1, spotLight1Color);
+        glUniform1f(spotLight1CutOffUniformLoc, cosf(spotLight1CutOff * M_PI / 180.0f));
+        glUniform1f(spotLight1OuterCutOffUniformLoc, cosf(spotLight1OuterCutOff * M_PI / 180.0f));
+
+        // Spot Light 2
+        glUniform3fv(spotLight2PosUniformLoc, 1, spotLight2Pos);
+        glUniform3fv(spotLight2DirUniformLoc, 1, spotLight2Dir);
+        glUniform3fv(spotLight2ColorUniformLoc, 1, spotLight2Color);
+        glUniform1f(spotLight2CutOffUniformLoc, cosf(spotLight2CutOff * M_PI / 180.0f));
+        glUniform1f(spotLight2OuterCutOffUniformLoc, cosf(spotLight2OuterCutOff * M_PI / 180.0f));
+
+        // Spot Light 3
+        glUniform3fv(spotLight3PosUniformLoc, 1, spotLight3Pos);
+        glUniform3fv(spotLight3DirUniformLoc, 1, spotLight3Dir);
+        glUniform3fv(spotLight3ColorUniformLoc, 1, spotLight3Color);
+        glUniform1f(spotLight3CutOffUniformLoc, cosf(spotLight3CutOff * M_PI / 180.0f));
+        glUniform1f(spotLight3OuterCutOffUniformLoc, cosf(spotLight3OuterCutOff * M_PI / 180.0f));
+
+        // Coefficients d'atténuation (communs aux 3 spots)
+        glUniform1f(constantUniformLoc, spotLightConstant);
+        glUniform1f(linearUniformLoc, spotLightLinear);
+        glUniform1f(quadraticUniformLoc, spotLightQuadratic);
 
         // Rendre chaque cube
         glBindVertexArray(VAO);
@@ -174,11 +239,6 @@ public:
             glDrawElements(GL_TRIANGLES, indicesCount, GL_UNSIGNED_INT, 0);
         }
         glBindVertexArray(0);
-
-        // // Optionnel: Dessiner un indicateur de direction de la flash light
-        // if (showFlashLightIndicator) {
-        //     drawFlashLightIndicator();
-        // }
     }
 
     void PostDraw() override {}
@@ -186,12 +246,9 @@ public:
 private:
     // Shader et buffers
     GLuint shaderProgram = 0;
-    GLuint indicatorShaderProgram = 0;
     GLuint VAO = 0;
     GLuint VBO = 0;
     GLuint EBO = 0;
-    GLuint indicatorVAO = 0;
-    GLuint indicatorVBO = 0;
 
     // Textures
     GLuint diffuseMap = 0;
@@ -203,31 +260,42 @@ private:
     // Variables d'animation
     float time = 0.0f;
     float cameraAngle = 0.0f;
-    float flashLightAngle = 0.0f;
-    bool showFlashLightIndicator = true;
+    float spotLight1Angle = 0.0f;
+    float spotLight2Angle = 0.0f;
+    float spotLight3Angle = 0.0f;
 
-    // Caméra et flash light
-    float cameraPos[3] = {0.0f, 3.0f, 8.0f};
+    // Caméra
+    float cameraPos[3] = {0.0f, 6.0f, 12.0f};
     float cameraFront[3] = {0.0f, 0.0f, -1.0f};
     float cameraUp[3] = {0.0f, 1.0f, 0.0f};
-    float cameraRadius = 10.0f;
-    float cameraHeight = 3.0f;
-    float cameraRotationSpeed = 10.0f;
 
-    // Flash Light properties
-    float flashLightPos[3] = {0.0f, 0.0f, 0.0f};  // Suit la caméra
-    float flashLightDir[3] = {0.0f, 0.0f, -1.0f}; // Direction de la caméra
-    float flashLightColor[3] = {1.0f, 0.9f, 0.7f}; // Couleur chaude (comme une lampe)
+    // ==================== 3 SPOT LIGHTS DIFFÉRENTES ====================
 
-    // Cône de lumière
-    float flashLightCutOff = 12.5f;        // Angle intérieur (degrés)
-    float flashLightOuterCutOff = 17.5f;   // Angle extérieur (degrés)
-    float flashLightIntensity = 1.0f;      // Intensité
+    // Spot Light 1: Projecteur tournant coloré
+    float spotLight1Pos[3] = {0.0f, 4.0f, 5.0f};
+    float spotLight1Dir[3] = {0.0f, -0.5f, -1.0f};
+    float spotLight1Color[3] = {1.0f, 0.5f, 0.8f};  // Rose
+    float spotLight1CutOff = 10.0f;
+    float spotLight1OuterCutOff = 15.0f;
 
-    // Atténuation (pour une lampe torche réaliste)
-    float flashLightConstant = 1.0f;
-    float flashLightLinear = 0.09f;
-    float flashLightQuadratic = 0.032f;
+    // Spot Light 2: Projecteur fixe balançant
+    float spotLight2Pos[3] = {-6.0f, 5.0f, 0.0f};
+    float spotLight2Dir[3] = {1.0f, -0.3f, 0.0f};
+    float spotLight2Color[3] = {0.7f, 0.8f, 1.0f};  // Bleu clair
+    float spotLight2CutOff = 8.0f;
+    float spotLight2OuterCutOff = 15.0f;
+
+    // Spot Light 3: Projecteur au sol
+    float spotLight3Pos[3] = {0.0f, 0.5f, 6.0f};
+    float spotLight3Dir[3] = {0.0f, 1.0f, -0.2f};
+    float spotLight3Color[3] = {1.0f, 0.8f, 0.2f};  // Jaune/orange
+    float spotLight3CutOff = 15.0f;
+    float spotLight3OuterCutOff = 25.0f;
+
+    // Atténuation commune
+    float spotLightConstant = 1.0f;
+    float spotLightLinear = 0.09f;
+    float spotLightQuadratic = 0.032f;
 
     // Matrices
     float modelMatrix[16];
@@ -243,16 +311,31 @@ private:
     GLint specularMapUniformLoc = -1;
     GLint viewPosUniformLoc = -1;
 
-    // Flash Light uniforms
-    GLint flashLightPosUniformLoc = -1;
-    GLint flashLightDirUniformLoc = -1;
-    GLint flashLightColorUniformLoc = -1;
-    GLint flashLightCutOffUniformLoc = -1;
-    GLint flashLightOuterCutOffUniformLoc = -1;
-    GLint flashLightIntensityUniformLoc = -1;
-    GLint flashLightConstantUniformLoc = -1;
-    GLint flashLightLinearUniformLoc = -1;
-    GLint flashLightQuadraticUniformLoc = -1;
+    // Spot Light 1 uniforms
+    GLint spotLight1PosUniformLoc = -1;
+    GLint spotLight1DirUniformLoc = -1;
+    GLint spotLight1ColorUniformLoc = -1;
+    GLint spotLight1CutOffUniformLoc = -1;
+    GLint spotLight1OuterCutOffUniformLoc = -1;
+
+    // Spot Light 2 uniforms
+    GLint spotLight2PosUniformLoc = -1;
+    GLint spotLight2DirUniformLoc = -1;
+    GLint spotLight2ColorUniformLoc = -1;
+    GLint spotLight2CutOffUniformLoc = -1;
+    GLint spotLight2OuterCutOffUniformLoc = -1;
+
+    // Spot Light 3 uniforms
+    GLint spotLight3PosUniformLoc = -1;
+    GLint spotLight3DirUniformLoc = -1;
+    GLint spotLight3ColorUniformLoc = -1;
+    GLint spotLight3CutOffUniformLoc = -1;
+    GLint spotLight3OuterCutOffUniformLoc = -1;
+
+    // Atténuation uniforms
+    GLint constantUniformLoc = -1;
+    GLint linearUniformLoc = -1;
+    GLint quadraticUniformLoc = -1;
 
     struct Vertex {
         float position[3];    // x, y, z
@@ -262,6 +345,16 @@ private:
 
     // Instances de cubes
     std::vector<CubeInstance> cubeInstances;
+
+    // ==================== FONCTIONS UTILITAIRES ====================
+    void normalizeVector(float* v) {
+        float length = sqrtf(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
+        if (length > 0.0001f) {
+            v[0] /= length;
+            v[1] /= length;
+            v[2] /= length;
+        }
+    }
 
     // ==================== FONCTION DE CHARGEMENT DE TEXTURE ====================
     GLuint loadTextureFromFile(const std::string& filename, bool gammaCorrection = false) {
@@ -480,15 +573,14 @@ private:
     }
 
     void updateViewProjectionMatrices() {
-        // Vue depuis la caméra (qui a la flash light)
         float eyeX = cameraPos[0];
         float eyeY = cameraPos[1];
         float eyeZ = cameraPos[2];
 
-        // Regarde dans la direction de la caméra
-        float centerX = cameraPos[0] + cameraFront[0];
-        float centerY = cameraPos[1] + cameraFront[1];
-        float centerZ = cameraPos[2] + cameraFront[2];
+        // Regarde vers le centre de la scène
+        float centerX = 0.0f;
+        float centerY = 0.0f;
+        float centerZ = 0.0f;
 
         lookAtMatrix(viewMatrix,
                     eyeX, eyeY, eyeZ,
@@ -501,154 +593,40 @@ private:
     void createInstances() {
         cubeInstances.clear();
 
-        // Créer une scène de cubes éparpillés
-        int cubeCount = 25;
-        float areaSize = 12.0f;
+        // Créer une scène avec des cubes en hauteur
+        int cubeCount = 20;
+        float platformRadius = 6.0f;
 
+        // Cubes sur une plateforme circulaire
         for (int i = 0; i < cubeCount; i++) {
             CubeInstance cube;
 
-            // Position aléatoire dans une zone
-            cube.position[0] = (static_cast<float>(rand()) / RAND_MAX * 2.0f - 1.0f) * areaSize;
-            cube.position[1] = (static_cast<float>(rand()) / RAND_MAX) * 2.0f;
-            cube.position[2] = (static_cast<float>(rand()) / RAND_MAX * 2.0f - 1.0f) * areaSize;
+            float angle = (float)i / cubeCount * 2.0f * M_PI;
+            float radius = platformRadius * (0.5f + static_cast<float>(rand()) / RAND_MAX * 0.5f);
+
+            cube.position[0] = cosf(angle) * radius;
+            cube.position[1] = static_cast<float>(rand()) / RAND_MAX * 3.0f;  // Hauteur variable
+            cube.position[2] = sinf(angle) * radius;
 
             cube.rotationAngleX = static_cast<float>(rand() % 360);
             cube.rotationAngleY = static_cast<float>(rand() % 360);
             cube.rotationAngleZ = static_cast<float>(rand() % 360);
 
-            cube.rotationSpeedX = 2.0f + static_cast<float>(rand() % 8);
-            cube.rotationSpeedY = 2.0f + static_cast<float>(rand() % 8);
-            cube.rotationSpeedZ = 2.0f + static_cast<float>(rand() % 8);
+            cube.rotationSpeedX = 3.0f + static_cast<float>(rand() % 6);
+            cube.rotationSpeedY = 3.0f + static_cast<float>(rand() % 6);
+            cube.rotationSpeedZ = 3.0f + static_cast<float>(rand() % 6);
 
-            cube.scale = 0.4f + static_cast<float>(rand() % 60) / 100.0f;
+            cube.scale = 0.5f + static_cast<float>(rand() % 50) / 100.0f;
 
             cubeInstances.push_back(cube);
         }
 
-        std::cout << "✓ Créé " << cubeInstances.size() << " cubes éparpillés" << std::endl;
-    }
-
-    void createFlashLightIndicator() {
-        // Créer un cône simple pour représenter la direction de la flash light
-        std::vector<float> coneVertices;
-
-        const int segments = 16;
-        const float height = 1.0f;
-        const float radius = 0.3f;
-
-        // Point du cône (à la position de la caméra)
-        coneVertices.push_back(0.0f);
-        coneVertices.push_back(0.0f);
-        coneVertices.push_back(0.0f);
-
-        // Base du cône
-        for (int i = 0; i <= segments; i++) {
-            float angle = 2.0f * M_PI * i / segments;
-            float x = cosf(angle) * radius;
-            float y = sinf(angle) * radius;
-
-            coneVertices.push_back(x);
-            coneVertices.push_back(y);
-            coneVertices.push_back(-height);
-        }
-
-        glGenVertexArrays(1, &indicatorVAO);
-        glGenBuffers(1, &indicatorVBO);
-
-        glBindVertexArray(indicatorVAO);
-        glBindBuffer(GL_ARRAY_BUFFER, indicatorVBO);
-        glBufferData(GL_ARRAY_BUFFER, coneVertices.size() * sizeof(float),
-                    coneVertices.data(), GL_STATIC_DRAW);
-
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void*)0);
-        glEnableVertexAttribArray(0);
-
-        glBindBuffer(GL_ARRAY_BUFFER, 0);
-        glBindVertexArray(0);
-    }
-
-    void drawFlashLightIndicator() {
-        // Dessiner un indicateur de direction pour la flash light
-        glUseProgram(indicatorShaderProgram);
-
-        // Matrice modèle pour l'indicateur
-        float indicatorModelMatrix[16];
-        identityMatrix(indicatorModelMatrix);
-
-        // Position à la caméra
-        indicatorModelMatrix[12] = cameraPos[0];
-        indicatorModelMatrix[13] = cameraPos[1];
-        indicatorModelMatrix[14] = cameraPos[2];
-
-        // Orientation dans la direction de la caméra
-        // (ceci nécessiterait une matrice de rotation plus complexe)
-        // Pour simplifier, on fait juste une translation
-
-        glUniformMatrix4fv(glGetUniformLocation(indicatorShaderProgram, "uModel"), 1, GL_FALSE, indicatorModelMatrix);
-        glUniformMatrix4fv(glGetUniformLocation(indicatorShaderProgram, "uView"), 1, GL_FALSE, viewMatrix);
-        glUniformMatrix4fv(glGetUniformLocation(indicatorShaderProgram, "uProjection"), 1, GL_FALSE, projectionMatrix);
-        glUniform3fv(glGetUniformLocation(indicatorShaderProgram, "uColor"), 1, flashLightColor);
-
-        glBindVertexArray(indicatorVAO);
-        glDrawArrays(GL_TRIANGLE_FAN, 0, 18);  // Cône simple
-        glBindVertexArray(0);
-    }
-
-    GLuint createIndicatorShaderProgram() {
-        // Shader simple pour l'indicateur
-        std::string vertexSource = R"(
-            #version 300 es
-            precision mediump float;
-
-            layout(location = 0) in vec3 aPosition;
-
-            uniform mat4 uModel;
-            uniform mat4 uView;
-            uniform mat4 uProjection;
-
-            void main() {
-                gl_Position = uProjection * uView * uModel * vec4(aPosition, 1.0);
-            }
-        )";
-
-        std::string fragmentSource = R"(
-            #version 300 es
-            precision mediump float;
-
-            out vec4 FragColor;
-            uniform vec3 uColor;
-
-            void main() {
-                FragColor = vec4(uColor, 0.5);  // Semi-transparent
-            }
-        )";
-
-        GLuint vertexShader = compileShader(GL_VERTEX_SHADER, vertexSource);
-        GLuint fragmentShader = compileShader(GL_FRAGMENT_SHADER, fragmentSource);
-
-        GLuint program = glCreateProgram();
-        glAttachShader(program, vertexShader);
-        glAttachShader(program, fragmentShader);
-        glLinkProgram(program);
-
-        GLint success;
-        glGetProgramiv(program, GL_LINK_STATUS, &success);
-        if (!success) {
-            char infoLog[512];
-            glGetProgramInfoLog(program, 512, nullptr, infoLog);
-            throw std::runtime_error(std::string("Erreur linkage indicator shader:\n") + std::string(infoLog));
-        }
-
-        glDeleteShader(vertexShader);
-        glDeleteShader(fragmentShader);
-
-        return program;
+        std::cout << "✓ Créé " << cubeInstances.size() << " cubes sur plateforme" << std::endl;
     }
 
     void initGL() {
-        std::cout << "Initializing Flash Light Cubes..." << std::endl;
-        std::cout << "Étape 5: Flash Light (Lampe torche)" << std::endl;
+        std::cout << "Initializing Spot Light Cubes..." << std::endl;
+        std::cout << "Étape 6: Spot Light (Projecteurs)" << std::endl;
         std::cout << "OpenGL version: " << glGetString(GL_VERSION) << std::endl;
 
         // ==================== CHARGEMENT DES TEXTURES ====================
@@ -683,10 +661,6 @@ private:
 
         // Création des shaders
         shaderProgram = createShaderProgram();
-        //indicatorShaderProgram = createIndicatorShaderProgram();
-
-        // Créer l'indicateur de flash light
-        //createFlashLightIndicator();
 
         // Création des données du cube
         createCubeData();
@@ -726,33 +700,27 @@ private:
         glBindVertexArray(0);
 
         // Configuration OpenGL
-        glClearColor(0.02f, 0.02f, 0.04f, 1.0f);  // Fond très sombre (nuit)
+        glClearColor(0.02f, 0.02f, 0.04f, 1.0f);  // Fond sombre
         glEnable(GL_DEPTH_TEST);
         glDepthFunc(GL_LESS);
         glEnable(GL_CULL_FACE);
         glCullFace(GL_BACK);
         glFrontFace(GL_CCW);
 
-        // Activer le blending pour l'indicateur
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        std::cout << "\n✓ Spot Light Cubes initialized successfully!" << std::endl;
 
-        std::cout << "\n✓ Flash Light Cubes initialized successfully!" << std::endl;
-
-        // Afficher les informations sur la flash light
-        std::cout << "\n=== FLASH LIGHT CONFIGURATION ===" << std::endl;
-        std::cout << "La flash light est ATTACHÉE À LA CAMÉRA" << std::endl;
-        std::cout << "Cône intérieur: " << flashLightCutOff << "°" << std::endl;
-        std::cout << "Cône extérieur: " << flashLightOuterCutOff << "°" << std::endl;
-        std::cout << "Couleur: Jaune chaud" << std::endl;
-        std::cout << "Atténuation: C=" << flashLightConstant
-                  << " L=" << flashLightLinear
-                  << " Q=" << flashLightQuadratic << std::endl;
-        std::cout << "\n=== INSTRUCTIONS VISUELLES ===" << std::endl;
-        std::cout << "1. La caméra tourne automatiquement" << std::endl;
-        std::cout << "2. La flash light suit la direction de la caméra" << std::endl;
-        std::cout << "3. Seuls les cubes dans le cône de lumière sont éclairés" << std::endl;
-        std::cout << "4. Effet de 'scintillement' réaliste" << std::endl;
+        // Afficher les informations sur les spot lights
+        std::cout << "\n=== SPOT LIGHTS CONFIGURATION ===" << std::endl;
+        std::cout << "3 PROJECTEURS DIFFÉRENTS:" << std::endl;
+        std::cout << "1. Projecteur tournant coloré (en hauteur)" << std::endl;
+        std::cout << "2. Projecteur fixe balançant (côté gauche)" << std::endl;
+        std::cout << "3. Projecteur au sol (éclairage vers le haut)" << std::endl;
+        std::cout << "\n=== CARACTÉRISTIQUES ===" << std::endl;
+        std::cout << "- Chaque spot a sa propre position/direction/couleur" << std::endl;
+        std::cout << "- Effets combinés sur les cubes" << std::endl;
+        std::cout << "- Cônes de lumière directionnels" << std::endl;
+        std::cout << "- Atténuation réaliste" << std::endl;
+        std::cout << "- Console: infos mises à jour toutes les 3 secondes" << std::endl;
         std::cout << "==================================" << std::endl;
     }
 
@@ -815,12 +783,9 @@ private:
         if (VAO != 0) glDeleteVertexArrays(1, &VAO);
         if (VBO != 0) glDeleteBuffers(1, &VBO);
         if (EBO != 0) glDeleteBuffers(1, &EBO);
-        if (indicatorVAO != 0) glDeleteVertexArrays(1, &indicatorVAO);
-        if (indicatorVBO != 0) glDeleteBuffers(1, &indicatorVBO);
         if (diffuseMap != 0) glDeleteTextures(1, &diffuseMap);
         if (specularMap != 0) glDeleteTextures(1, &specularMap);
         if (shaderProgram != 0) glDeleteProgram(shaderProgram);
-        if (indicatorShaderProgram != 0) glDeleteProgram(indicatorShaderProgram);
     }
 
     GLuint compileShader(GLenum type, const std::string& source) {
@@ -843,7 +808,7 @@ private:
     }
 
     GLuint createShaderProgram() {
-        std::cout << "\n--- CRÉATION DU SHADER FLASH LIGHT ---" << std::endl;
+        std::cout << "\n--- CRÉATION DU SHADER SPOT LIGHT (3 projecteurs) ---" << std::endl;
 
         // Vertex Shader
         std::string vertexSource = R"(
@@ -871,7 +836,7 @@ private:
             }
         )";
 
-        // Fragment Shader avec FLASH LIGHT (lampe torche)
+        // Fragment Shader avec 3 SPOT LIGHTS
         std::string fragmentSource = R"(
             #version 300 es
             precision mediump float;
@@ -887,16 +852,62 @@ private:
             uniform sampler2D uDiffuseMap;
             uniform sampler2D uSpecularMap;
 
-            // Flash Light properties
-            uniform vec3 uFlashLightPos;
-            uniform vec3 uFlashLightDir;
-            uniform vec3 uFlashLightColor;
-            uniform float uFlashLightCutOff;
-            uniform float uFlashLightOuterCutOff;
-            uniform float uFlashLightIntensity;
-            uniform float uFlashLightConstant;
-            uniform float uFlashLightLinear;
-            uniform float uFlashLightQuadratic;
+            // ========== SPOT LIGHT STRUCTURE ==========
+            struct SpotLight {
+                vec3 position;
+                vec3 direction;
+                vec3 color;
+                float cutOff;
+                float outerCutOff;
+            };
+
+            // ========== 3 SPOT LIGHTS ==========
+            uniform SpotLight uSpotLight1;
+            uniform SpotLight uSpotLight2;
+            uniform SpotLight uSpotLight3;
+
+            // ========== ATTÉNUATION ==========
+            uniform float uConstant;
+            uniform float uLinear;
+            uniform float uQuadratic;
+
+            // ========== FONCTION POUR CALCULER UNE SPOT LIGHT ==========
+            vec3 calculateSpotLight(SpotLight light, vec3 normal, vec3 viewDir, vec3 diffuseColor, vec3 specularColor) {
+                vec3 lightDir = normalize(light.position - FragPos);
+
+                // Vérifier si dans le cône
+                float theta = dot(lightDir, normalize(-light.direction));
+                float epsilon = light.cutOff - light.outerCutOff;
+                float intensity = clamp((theta - light.outerCutOff) / epsilon, 0.0, 1.0);
+
+                // Si hors du cône, pas d'éclairage
+                if (theta < light.outerCutOff) {
+                    return vec3(0.0);
+                }
+
+                // Atténuation
+                float distance = length(light.position - FragPos);
+                float attenuation = 1.0 / (uConstant + uLinear * distance + uQuadratic * distance * distance);
+
+                // Ambient (très faible pour des spots)
+                vec3 ambient = light.color * 0.05;
+
+                // Diffuse
+                float diff = max(dot(normal, lightDir), 0.0);
+                vec3 diffuse = diff * light.color;
+
+                // Specular
+                vec3 reflectDir = reflect(-lightDir, normal);
+                float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+                vec3 specular = spec * light.color * specularColor * 0.5;
+
+                // Appliquer intensité et atténuation
+                ambient *= attenuation * intensity;
+                diffuse *= attenuation * intensity;
+                specular *= attenuation * intensity;
+
+                return (ambient + diffuse + specular) * diffuseColor;
+            }
 
             void main() {
                 // Propriétés des matériaux
@@ -906,54 +917,33 @@ private:
                 vec3 norm = normalize(Normal);
                 vec3 viewDir = normalize(uViewPos - FragPos);
 
-                // ========== CALCULS FLASH LIGHT ==========
-                vec3 lightDir = normalize(uFlashLightPos - FragPos);
+                // ========== CALCUL DES 3 SPOT LIGHTS ==========
+                vec3 result = vec3(0.0);
 
-                // Vérifier si le fragment est dans le cône de lumière
-                float theta = dot(lightDir, normalize(-uFlashLightDir));
-                float epsilon = uFlashLightCutOff - uFlashLightOuterCutOff;
-                float intensity = clamp((theta - uFlashLightOuterCutOff) / epsilon, 0.0, 1.0);
+                // Spot Light 1
+                result += calculateSpotLight(uSpotLight1, norm, viewDir, diffuseColor, specularColor);
 
-                // Si en dehors du cône, pas d'éclairage
-                if (theta < uFlashLightOuterCutOff) {
-                    // Seul un très faible éclairage ambiant
-                    FragColor = vec4(diffuseColor * 0.05, 1.0);
-                    return;
-                }
+                // Spot Light 2
+                result += calculateSpotLight(uSpotLight2, norm, viewDir, diffuseColor, specularColor);
 
-                // ========== ATTÉNUATION ==========
-                float distance = length(uFlashLightPos - FragPos);
-                float attenuation = 1.0 / (uFlashLightConstant + uFlashLightLinear * distance +
-                                          uFlashLightQuadratic * distance * distance);
+                // Spot Light 3
+                result += calculateSpotLight(uSpotLight3, norm, viewDir, diffuseColor, specularColor);
 
-                // ========== ÉCLAIRAGE ==========
-                // Ambient (très faible pour une lampe torche)
-                vec3 ambient = uFlashLightColor * 0.1;
+                // ========== EFFETS VISUELS SUPPLÉMENTAIRES ==========
 
-                // Diffuse
-                float diff = max(dot(norm, lightDir), 0.0);
-                vec3 diffuse = diff * uFlashLightColor;
+                // Lumière ambiante globale très faible
+                vec3 globalAmbient = vec3(0.03, 0.03, 0.05);
+                result += globalAmbient * diffuseColor;
 
-                // Specular
-                vec3 reflectDir = reflect(-lightDir, norm);
-                float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
-                vec3 specular = spec * uFlashLightColor * specularColor;
-
-                // ========== APPLIQUER INTENSITÉ ET ATTÉNUATION ==========
-                ambient *= attenuation * intensity * uFlashLightIntensity;
-                diffuse *= attenuation * intensity * uFlashLightIntensity;
-                specular *= attenuation * intensity * uFlashLightIntensity;
-
-                // ========== RÉSULTAT FINAL ==========
-                vec3 result = (ambient + diffuse + specular) * diffuseColor;
-
-                // Effet de bordure du cône (soft edge)
-                float edgeFactor = 1.0 - smoothstep(uFlashLightOuterCutOff, uFlashLightCutOff, theta);
-                result += edgeFactor * 0.1 * uFlashLightColor;
-
-                // Scintillement réaliste
-                float flicker = 0.95 + 0.05 * sin(uTime * 15.0);
+                // Scintillement subtil
+                float flicker = 0.98 + 0.02 * sin(uTime * 10.0);
                 result *= flicker;
+
+                // Effet de "bloom" pour les zones très éclairées
+                float brightness = dot(result, vec3(0.2126, 0.7152, 0.0722));
+                if (brightness > 0.8) {
+                    result = mix(result, vec3(1.0), 0.1);
+                }
 
                 // Gamma correction
                 result = pow(result, vec3(1.0 / 2.2));
@@ -990,18 +980,33 @@ private:
         specularMapUniformLoc = glGetUniformLocation(program, "uSpecularMap");
         viewPosUniformLoc = glGetUniformLocation(program, "uViewPos");
 
-        // Flash Light uniforms
-        flashLightPosUniformLoc = glGetUniformLocation(program, "uFlashLightPos");
-        flashLightDirUniformLoc = glGetUniformLocation(program, "uFlashLightDir");
-        flashLightColorUniformLoc = glGetUniformLocation(program, "uFlashLightColor");
-        flashLightCutOffUniformLoc = glGetUniformLocation(program, "uFlashLightCutOff");
-        flashLightOuterCutOffUniformLoc = glGetUniformLocation(program, "uFlashLightOuterCutOff");
-        flashLightIntensityUniformLoc = glGetUniformLocation(program, "uFlashLightIntensity");
-        flashLightConstantUniformLoc = glGetUniformLocation(program, "uFlashLightConstant");
-        flashLightLinearUniformLoc = glGetUniformLocation(program, "uFlashLightLinear");
-        flashLightQuadraticUniformLoc = glGetUniformLocation(program, "uFlashLightQuadratic");
+        // Spot Light 1 uniforms
+        spotLight1PosUniformLoc = glGetUniformLocation(program, "uSpotLight1.position");
+        spotLight1DirUniformLoc = glGetUniformLocation(program, "uSpotLight1.direction");
+        spotLight1ColorUniformLoc = glGetUniformLocation(program, "uSpotLight1.color");
+        spotLight1CutOffUniformLoc = glGetUniformLocation(program, "uSpotLight1.cutOff");
+        spotLight1OuterCutOffUniformLoc = glGetUniformLocation(program, "uSpotLight1.outerCutOff");
 
-        std::cout << "✓ Shader Flash Light créé avec succès!" << std::endl;
+        // Spot Light 2 uniforms
+        spotLight2PosUniformLoc = glGetUniformLocation(program, "uSpotLight2.position");
+        spotLight2DirUniformLoc = glGetUniformLocation(program, "uSpotLight2.direction");
+        spotLight2ColorUniformLoc = glGetUniformLocation(program, "uSpotLight2.color");
+        spotLight2CutOffUniformLoc = glGetUniformLocation(program, "uSpotLight2.cutOff");
+        spotLight2OuterCutOffUniformLoc = glGetUniformLocation(program, "uSpotLight2.outerCutOff");
+
+        // Spot Light 3 uniforms
+        spotLight3PosUniformLoc = glGetUniformLocation(program, "uSpotLight3.position");
+        spotLight3DirUniformLoc = glGetUniformLocation(program, "uSpotLight3.direction");
+        spotLight3ColorUniformLoc = glGetUniformLocation(program, "uSpotLight3.color");
+        spotLight3CutOffUniformLoc = glGetUniformLocation(program, "uSpotLight3.cutOff");
+        spotLight3OuterCutOffUniformLoc = glGetUniformLocation(program, "uSpotLight3.outerCutOff");
+
+        // Atténuation uniforms
+        constantUniformLoc = glGetUniformLocation(program, "uConstant");
+        linearUniformLoc = glGetUniformLocation(program, "uLinear");
+        quadraticUniformLoc = glGetUniformLocation(program, "uQuadratic");
+
+        std::cout << "✓ Shader Spot Light (3 projecteurs) créé avec succès!" << std::endl;
 
         return program;
     }
@@ -1011,65 +1016,76 @@ private:
     std::vector<GLuint> cubeIndices;
 };
 
-std::unique_ptr<FlashLightCubes> g_flashLightCubes;
+std::unique_ptr<SpotLightCubes> g_spotLightCubes;
 
 int main() {
     try {
         std::cout << "========================================" << std::endl;
-        std::cout << "OBJECTIF 2 - ÉTAPE 5: FLASH LIGHT" << std::endl;
+        std::cout << "OBJECTIF 2 - ÉTAPE 6: SPOT LIGHT" << std::endl;
         std::cout << "========================================" << std::endl;
         std::cout << "Caractéristiques:" << std::endl;
-        std::cout << " - 25 cubes éparpillés avec rotation" << std::endl;
+        std::cout << " - 20 cubes sur plateforme avec rotation" << std::endl;
         std::cout << " - VOTRE texture brickwall.jpg" << std::endl;
-        std::cout << " - FLASH LIGHT (Lampe torche)" << std::endl;
-        std::cout << " - Attachée à la caméra" << std::endl;
-        std::cout << " - Cône de lumière directionnel" << std::endl;
+        std::cout << " - 3 SPOT LIGHTS (Projecteurs) différents:" << std::endl;
+        std::cout << "   1. Projecteur tournant coloré (en hauteur)" << std::endl;
+        std::cout << "   2. Projecteur fixe balançant (côté gauche)" << std::endl;
+        std::cout << "   3. Projecteur au sol (éclairage vers le haut)" << std::endl;
+        std::cout << " - Cônes de lumière directionnels" << std::endl;
+        std::cout << " - Effets combinés des 3 lumières" << std::endl;
         std::cout << " - Atténuation réaliste" << std::endl;
-        std::cout << " - Effet de scintillement" << std::endl;
-        std::cout << " - Caméra orbitale automatique" << std::endl;
+        std::cout << " - Caméra orbitale haute" << std::endl;
         std::cout << "========================================" << std::endl;
         std::cout << "OBSERVEZ:" << std::endl;
-        std::cout << " - Seuls les cubes dans le cône de lumière sont éclairés" << std::endl;
-        std::cout << " - La lumière suit la direction de la caméra" << std::endl;
-        std::cout << " - Effet réaliste de lampe torche dans le noir" << std::endl;
-        std::cout << " - Scintillement subtil pour plus de réalisme" << std::endl;
+        std::cout << " - Les 3 projecteurs ont des comportements différents" << std::endl;
+        std::cout << " - Chaque projecteur crée un cône de lumière distinct" << std::endl;
+        std::cout << " - Les cubes sont éclairés par la combinaison des 3 lumières" << std::endl;
+        std::cout << " - Effet de scène éclairée (comme un concert ou théâtre)" << std::endl;
         std::cout << "========================================" << std::endl;
-        std::cout << "INFO: La console affiche les paramètres en temps réel" << std::endl;
+        std::cout << "INFO: La console affiche les paramètres toutes les 3 secondes" << std::endl;
         std::cout << "========================================" << std::endl;
 
         // Configuration de la fenêtre
         common::WindowConfig config;
         config.width = 800;
         config.height = 600;
-        config.title = "Objectif 2 - Étape 5: Flash Light (Lampe torche)";
+        config.title = "Objectif 2 - Étape 6: Spot Light (3 Projecteurs)";
         config.renderer = common::WindowConfig::RendererType::OPENGL;
         config.fixed_dt = 1.0f / 60.0f;
         common::SetWindowConfig(config);
 
         // Création de l'application
-        g_flashLightCubes = std::make_unique<FlashLightCubes>();
+        g_spotLightCubes = std::make_unique<SpotLightCubes>();
 
         // Enregistrement dans le moteur
-        common::SystemObserverSubject::AddObserver(g_flashLightCubes.get());
-        common::DrawObserverSubject::AddObserver(g_flashLightCubes.get());
+        common::SystemObserverSubject::AddObserver(g_spotLightCubes.get());
+        common::DrawObserverSubject::AddObserver(g_spotLightCubes.get());
 
         // Lancement du moteur
         common::RunEngine();
 
         // Nettoyage
-        common::SystemObserverSubject::RemoveObserver(g_flashLightCubes.get());
-        common::DrawObserverSubject::RemoveObserver(g_flashLightCubes.get());
-        g_flashLightCubes.reset();
+        common::SystemObserverSubject::RemoveObserver(g_spotLightCubes.get());
+        common::DrawObserverSubject::RemoveObserver(g_spotLightCubes.get());
+        g_spotLightCubes.reset();
 
-        std::cout << "\n✓ Étape 5 terminée avec succès!" << std::endl;
+        std::cout << "\n✓ Étape 6 terminée avec succès!" << std::endl;
+        std::cout << "\n🎉 FÉLICITATIONS ! 🎉" << std::endl;
+        std::cout << "Vous avez complété TOUTES les étapes de l'Objectif 2 !" << std::endl;
+        std::cout << "Récapitulatif des 6 étapes implémentées:" << std::endl;
+        std::cout << "1. Point Light Infini ✓" << std::endl;
+        std::cout << "2. Lighting Maps ✓" << std::endl;
+        std::cout << "3. Directional Light ✓" << std::endl;
+        std::cout << "4. Point Light with Attenuation ✓" << std::endl;
+        std::cout << "5. Flash Light ✓" << std::endl;
+        std::cout << "6. Spot Light ✓" << std::endl;
 
     } catch (const std::exception& e) {
         std::cerr << "\n✗ ERREUR: " << e.what() << std::endl;
 
-        if (g_flashLightCubes) {
-            common::SystemObserverSubject::RemoveObserver(g_flashLightCubes.get());
-            common::DrawObserverSubject::RemoveObserver(g_flashLightCubes.get());
-            g_flashLightCubes.reset();
+        if (g_spotLightCubes) {
+            common::SystemObserverSubject::RemoveObserver(g_spotLightCubes.get());
+            common::DrawObserverSubject::RemoveObserver(g_spotLightCubes.get());
+            g_spotLightCubes.reset();
         }
         return -1;
     }
