@@ -61,9 +61,30 @@ target_link_libraries(quad_texture PUBLIC CompGraphLib)
 add_executable(cube_rotation main/main_sample_cube.cc)
 target_link_libraries(cube_rotation PUBLIC CompGraphLib)
 
-# Sample 9: Cubes rotation
+# Sample 9: Cubes rotation with light
 add_executable(cube_multi_rotation main/main_sample_cube_multi.cc)
 target_link_libraries(cube_multi_rotation PUBLIC CompGraphLib)
+
+# Sample 10: Cubes rotation with texture
+add_executable(cube_multi_texture main/main_multi_cube_texture.cc)
+target_link_libraries(cube_multi_texture PUBLIC CompGraphLib)
+
+# Sample 11: Cubes rotation with lighting maps
+add_executable(cube_lighting_maps main/main_lighting_maps.cc)
+target_link_libraries(cube_lighting_maps PUBLIC CompGraphLib)
+
+# Sample 12: Cubes rotation with directional light
+add_executable(cube_directional_light main/main_directional_light.cc
+        main/main_flash_light.cc)
+target_link_libraries(cube_directional_light PUBLIC CompGraphLib)
+
+# Sample 13: Cubes rotation with point light attenuation
+add_executable(cube_point_light_attenuation main/main_point_light_attenuation.cc)
+target_link_libraries(cube_point_light_attenuation PUBLIC CompGraphLib)
+
+# Sample 14: Cubes rotation with flash light
+add_executable(cube_point_light_attenuation main/main_point_light_attenuation.cc)
+target_link_libraries(cube_point_light_attenuation PUBLIC CompGraphLib)
 
 # Option 2: Boucle automatique pour les autres fichiers main (sauf ceux déjà créés)
 

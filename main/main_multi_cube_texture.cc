@@ -8,39 +8,39 @@
 #include <algorithm>
 #include <corecrt_math_defines.h>
 
-// Ajouter les includes pour le chargement d'images
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-
 #include "engine/engine.h"
 #include "engine/window.h"
 #include "engine/renderer.h"
 #include "engine/system.h"
 #include "third_party/gl_include.h"
 
-class MultiTexturedCube3D : public common::DrawInterface, public common::SystemInterface {
+// Pour la gestion des textures
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
+class TexturedMultiCube3D : public common::DrawInterface, public common::SystemInterface {
 public:
     struct CubeInstance {
-        float position[3];        // Position dans le monde (centre de rotation)
-        float rotationAngleX;     // Rotation sur l'axe X local
-        float rotationAngleY;     // Rotation sur l'axe Y local
-        float rotationAngleZ;     // Rotation sur l'axe Z local
-        float rotationSpeedX;     // Vitesse de rotation X
-        float rotationSpeedY;     // Vitesse de rotation Y
-        float rotationSpeedZ;     // Vitesse de rotation Z
-        float scale;              // Échelle
+        float position[3];        // Position dans le monde
+        float rotationAngleX;     // Rotation individuelle
+        float rotationAngleY;
+        float rotationAngleZ;
+        float rotationSpeedX;
+        float rotationSpeedY;
+        float rotationSpeedZ;
+        float scale;              // Échelle individuelle
     };
 
     void Begin() override {
-        std::cout << "MultiTexturedCube3D::Begin()" << std::endl;
+        std::cout << "TexturedMultiCube3D::Begin()" << std::endl;
         initGL();
-        createInstances();
+        createInstances();  // Créer plusieurs instances de cubes
     }
 
     void Update(float dt) override {
         time += dt;
 
-        // Mettre à jour la rotation de chaque cube sur ses propres axes
+        // Mettre à jour chaque instance de cube
         for (auto& cube : cubeInstances) {
             cube.rotationAngleX += cube.rotationSpeedX * dt;
             cube.rotationAngleY += cube.rotationSpeedY * dt;
@@ -52,24 +52,24 @@ public:
             cube.rotationAngleZ = fmodf(cube.rotationAngleZ, 360.0f);
         }
 
-        // Animation de la caméra orbitale (la caméra tourne autour des cubes)
-        cameraAngle += cameraOrbitSpeed * dt;
-        if (cameraAngle > 360.0f) cameraAngle -= 360.0f;
+        // Animation de la caméra orbitale
+        // cameraAngle += cameraOrbitSpeed * dt;
+        // if (cameraAngle > 360.0f) cameraAngle -= 360.0f;
 
         // Affichage périodique des informations
         static float infoTimer = 0.0f;
         infoTimer += dt;
         if (infoTimer >= 2.0f) {
             infoTimer = 0.0f;
-            std::cout << "Nombre de cubes: " << cubeInstances.size()
-                      << ", Texture: brickwall.jpg" << std::endl;
+            std::cout << "Nombre de cubes texturés: " << cubeInstances.size()
+                      << ", Temps: " << (int)time << "s" << std::endl;
         }
     }
 
     void FixedUpdate() override {}
 
     void End() override {
-        std::cout << "MultiTexturedCube3D::End()" << std::endl;
+        std::cout << "TexturedMultiCube3D::End()" << std::endl;
         cleanup();
     }
 
@@ -83,13 +83,13 @@ public:
 
         // Activer la texture
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, texture);
+        glBindTexture(GL_TEXTURE_2D, textureID);
         glUniform1i(textureUniformLoc, 0);
 
-        // Calculer et passer les matrices de vue et projection
+        // Calculer et passer les matrices de vue et projection (communes à tous les cubes)
         updateViewProjectionMatrices();
 
-        // Passer les matrices au shader
+        // Passer les matrices de vue et projection au shader
         if (viewMatrixUniformLoc != -1) {
             glUniformMatrix4fv(viewMatrixUniformLoc, 1, GL_FALSE, viewMatrix);
         }
@@ -126,7 +126,7 @@ private:
     GLuint VAO = 0;
     GLuint VBO = 0;
     GLuint EBO = 0;
-    GLuint texture = 0;
+    GLuint textureID = 0;  // ID de la texture
 
     GLsizei verticesCount = 0;
     GLsizei indicesCount = 0;
@@ -136,8 +136,8 @@ private:
 
     // Caméra
     float cameraAngle = 0.0f;
-    float cameraOrbitSpeed = 25.0f;  // Plus rapide pour mieux voir la rotation
-    float cameraDistance = 8.0f;     // Plus loin pour voir tous les cubes
+    float cameraOrbitSpeed = 15.0f;
+    float cameraDistance = 8.0f;  // Plus loin pour voir tous les cubes
     float cameraHeight = 2.0f;
 
     // Matrices
@@ -150,12 +150,12 @@ private:
     GLint viewMatrixUniformLoc = -1;
     GLint projectionMatrixUniformLoc = -1;
     GLint timeUniformLoc = -1;
-    GLint textureUniformLoc = -1;
+    GLint textureUniformLoc = -1;  // Pour la texture
 
     struct Vertex {
         float position[3];    // x, y, z
+        float texCoord[2];    // u, v (coordonnées de texture)
         float normal[3];      // nx, ny, nz
-        float texCoord[2];    // u, v
     };
 
     // Instances de cubes
@@ -278,12 +278,7 @@ private:
     }
 
     void updateModelMatrix(const CubeInstance& cube) {
-        // IMPORTANT: Pour une rotation sur place (autour du centre du cube)
-        // L'ordre des transformations est crucial :
-        // 1. D'abord on translate le cube à sa position
-        // 2. Ensuite on applique les rotations (autour du centre maintenant translaté)
-        // 3. Enfin on applique l'échelle
-
+        // Matrices de transformation
         float translate[16], scaleMat[16];
         float rotX[16], rotY[16], rotZ[16];
         float temp1[16], temp2[16];
@@ -295,31 +290,22 @@ private:
         rotateYMatrix(rotY, cube.rotationAngleY);
         rotateZMatrix(rotZ, cube.rotationAngleZ);
 
-        // CORRECTION: Pour que le cube tourne sur lui-même (autour de son centre)
-        // Modèle = Translation * RotationZ * RotationY * RotationX * Scale
-        // Cet ordre fait que la rotation se fait autour du centre du cube
-
-        // Échelle d'abord
-        multiplyMatrices(temp1, scaleMat, rotX);        // Scale * RotX
-        multiplyMatrices(temp2, rotY, temp1);           // RotY * (Scale * RotX)
-        multiplyMatrices(temp1, rotZ, temp2);           // RotZ * (RotY * (Scale * RotX))
-        multiplyMatrices(modelMatrix, translate, temp1);// Translation * (RotZ * RotY * RotX * Scale)
+        // Combinaison: Modèle = Translation * RotationZ * RotationY * RotationX * Scale
+        multiplyMatrices(temp1, scaleMat, rotX);
+        multiplyMatrices(temp2, rotY, temp1);
+        multiplyMatrices(temp1, rotZ, temp2);
+        multiplyMatrices(modelMatrix, translate, temp1);
     }
 
     void updateViewProjectionMatrices() {
-        // Matrice vue : caméra orbitale autour du centre de la scène
+        // Matrice vue : caméra orbitale
         float eyeX = cameraDistance * sinf(cameraAngle * M_PI / 180.0f);
         float eyeY = cameraHeight;
         float eyeZ = cameraDistance * cosf(cameraAngle * M_PI / 180.0f);
 
-        // Regarder vers le centre de la scène (où sont les cubes)
-        float centerX = 0.0f;
-        float centerY = 1.5f;  // Un peu au-dessus pour voir les cubes empilés
-        float centerZ = 0.0f;
-
         lookAtMatrix(viewMatrix,
                     eyeX, eyeY, eyeZ,    // Position caméra
-                    centerX, centerY, centerZ,    // Regarde vers le centre des cubes
+                    0.0f, 0.0f, 0.0f,    // Regarde vers le centre
                     0.0f, 1.0f, 0.0f);   // Up vector
 
         // Matrice projection : perspective
@@ -327,162 +313,136 @@ private:
     }
 
     void createInstances() {
-        // Créer plusieurs cubes à différentes positions
+        // Créer 12 cubes à différentes positions
         cubeInstances.clear();
 
-        int cubeCount = 9;  // 9 cubes en grille 3x3
+        // Configuration pour une grille de cubes
+        int gridSize = 3;  // 3x3x3 = 27 cubes max
+        float spacing = 2.5f;
 
-        // Grille 3x3
-        int gridSize = 3;
-        float spacing = 3.0f;  // Plus d'espace entre les cubes
+        int cubeCount = 0;
+        const int maxCubes = 12;  // Nombre total de cubes à créer
 
-        int cubeIndex = 0;
-        for (int x = -1; x <= 1; x++) {
-            for (int z = -1; z <= 1; z++) {
-                CubeInstance cube;
+        for (int x = -gridSize; x <= gridSize && cubeCount < maxCubes; x++) {
+            for (int y = -gridSize; y <= gridSize && cubeCount < maxCubes; y++) {
+                for (int z = -gridSize; z <= gridSize && cubeCount < maxCubes; z++) {
+                    // Ne pas mettre de cube au centre (pour la visibilité)
+                    if (x == 0 && y == 0 && z == 0) continue;
 
-                // Position dans une grille
-                cube.position[0] = x * spacing;
-                cube.position[1] = 0.0f;  // Tous au même niveau
-                cube.position[2] = z * spacing;
+                    CubeInstance cube;
 
-                // Rotations initiales différentes pour chaque cube
-                cube.rotationAngleX = static_cast<float>(rand() % 360);
-                cube.rotationAngleY = static_cast<float>(rand() % 360);
-                cube.rotationAngleZ = static_cast<float>(rand() % 360);
+                    // Position dans une grille
+                    cube.position[0] = x * spacing;
+                    cube.position[1] = y * spacing;
+                    cube.position[2] = z * spacing;
 
-                // Vitesses de rotation différentes pour chaque cube
-                // Certains tournent plus vite sur certains axes pour plus de variété
-                cube.rotationSpeedX = 20.0f + static_cast<float>(rand() % 40);
-                cube.rotationSpeedY = 20.0f + static_cast<float>(rand() % 40);
-                cube.rotationSpeedZ = 20.0f + static_cast<float>(rand() % 40);
+                    // Rotations initiales aléatoires
+                    cube.rotationAngleX = static_cast<float>(rand() % 360);
+                    cube.rotationAngleY = static_cast<float>(rand() % 360);
+                    cube.rotationAngleZ = static_cast<float>(rand() % 360);
 
-                // Échelle légèrement différente pour chaque cube
-                cube.scale = 0.8f + static_cast<float>(rand() % 20) / 100.0f;  // Entre 0.8 et 1.0
+                    // Vitesses de rotation différentes pour chaque cube
+                    cube.rotationSpeedX = 10.0f + static_cast<float>(rand() % 40);
+                    cube.rotationSpeedY = 10.0f + static_cast<float>(rand() % 40);
+                    cube.rotationSpeedZ = 10.0f + static_cast<float>(rand() % 40);
 
-                cubeInstances.push_back(cube);
-                cubeIndex++;
+                    // Échelle variée
+                    cube.scale = 0.3f + static_cast<float>(rand() % 70) / 100.0f;  // Entre 0.3 et 1.0
 
-                if (cubeIndex >= cubeCount) break;
+                    cubeInstances.push_back(cube);
+                    cubeCount++;
+
+                    if (cubeCount >= maxCubes) break;
+                }
+                if (cubeCount >= maxCubes) break;
             }
-            if (cubeIndex >= cubeCount) break;
+            if (cubeCount >= maxCubes) break;
         }
 
-        std::cout << "Créé " << cubeInstances.size() << " cubes tournant sur eux-mêmes" << std::endl;
-        std::cout << "Chaque cube tourne autour de son propre centre" << std::endl;
+        std::cout << "Créé " << cubeInstances.size() << " cubes texturés à différentes positions" << std::endl;
     }
 
-    GLuint loadTextureFromFile(const std::string& filename) {
-        GLuint textureID;
-        glGenTextures(1, &textureID);
+    // Fonction pour charger une texture avec stb_image
+    GLuint loadTexture(const std::string& texturePath) {
+        std::cout << "Chargement de la texture: " << texturePath << std::endl;
 
-        int width, height, nrComponents;
+        int width, height, nrChannels;
+        unsigned char* data = stbi_load(texturePath.c_str(), &width, &height, &nrChannels, 0);
 
-        // Charger l'image avec stb_image
-        stbi_set_flip_vertically_on_load(true);  // OpenGL attend l'origine en bas
-        unsigned char* data = stbi_load(filename.c_str(), &width, &height, &nrComponents, 0);
+        if (!data) {
+            std::cerr << "ERREUR: Impossible de charger la texture: " << texturePath << std::endl;
+            std::cerr << "Assurez-vous que le fichier existe dans le dossier textures/" << std::endl;
 
-        if (data) {
-            GLenum format;
-            if (nrComponents == 1)
-                format = GL_RED;
-            else if (nrComponents == 3)
-                format = GL_RGB;
-            else if (nrComponents == 4)
-                format = GL_RGBA;
-            else {
-                std::cerr << "Format d'image non supporté: " << nrComponents << " composants" << std::endl;
-                stbi_image_free(data);
-                return 0;
-            }
-
-            glBindTexture(GL_TEXTURE_2D, textureID);
-            glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
-            glGenerateMipmap(GL_TEXTURE_2D);
-
-            // Configuration du filtrage
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-            std::cout << "Texture chargée: " << filename
-                      << " (" << width << "x" << height
-                      << ", " << nrComponents << " composants)" << std::endl;
-
-            stbi_image_free(data);
-        } else {
-            std::cerr << "Échec du chargement de la texture: " << filename << std::endl;
-
-            // Créer une texture de secours (checkerboard)
-            const int texWidth = 256;
-            const int texHeight = 256;
-            std::vector<unsigned char> backupData(texWidth * texHeight * 3);
-
-            for (int y = 0; y < texHeight; ++y) {
-                for (int x = 0; x < texWidth; ++x) {
-                    int idx = (y * texWidth + x) * 3;
-                    bool isBlack = ((x / 32) + (y / 32)) % 2 == 0;
-                    if (isBlack) {
-                        backupData[idx] = 50;
-                        backupData[idx + 1] = 50;
-                        backupData[idx + 2] = 50;
-                    } else {
-                        backupData[idx] = 200;
-                        backupData[idx + 1] = 100;
-                        backupData[idx + 2] = 50;
-                    }
-                }
-            }
-
-            glBindTexture(GL_TEXTURE_2D, textureID);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, texWidth, texHeight, 0,
-                         GL_RGB, GL_UNSIGNED_BYTE, backupData.data());
-            glGenerateMipmap(GL_TEXTURE_2D);
-
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-            std::cout << "Texture de secours créée (256x256)" << std::endl;
+            // Fallback: créer une texture rouge simple
+            return createDefaultTexture();
         }
 
+        std::cout << "Texture chargée: " << width << "x" << height << ", canaux: " << nrChannels << std::endl;
+
+        GLuint texture;
+        glGenTextures(1, &texture);
+        glBindTexture(GL_TEXTURE_2D, texture);
+
+        // Paramètres de texture
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+        // Déterminer le format en fonction du nombre de canaux
+        GLenum format = GL_RGB;
+        if (nrChannels == 4)
+            format = GL_RGBA;
+        else if (nrChannels == 1)
+            format = GL_RED;
+
+        // Charger les données de texture
+        glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+        glGenerateMipmap(GL_TEXTURE_2D);
+
+        // Libérer les données de l'image
+        stbi_image_free(data);
+
         glBindTexture(GL_TEXTURE_2D, 0);
-        return textureID;
+
+        std::cout << "Texture chargée avec succès!" << std::endl;
+        return texture;
+    }
+
+    GLuint createDefaultTexture() {
+        std::cout << "Création d'une texture de secours..." << std::endl;
+
+        const int width = 2;
+        const int height = 2;
+        unsigned char textureData[] = {
+            255, 100, 100, 255,   // Rouge clair
+            150, 50, 50, 255,     // Rouge foncé
+            150, 50, 50, 255,     // Rouge foncé
+            255, 100, 100, 255    // Rouge clair
+        };
+
+        GLuint texture;
+        glGenTextures(1, &texture);
+        glBindTexture(GL_TEXTURE_2D, texture);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, textureData);
+
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        return texture;
     }
 
     void initGL() {
-        std::cout << "Initializing MultiTexturedCube3D..." << std::endl;
+        std::cout << "Initializing Textured MultiCube 3D..." << std::endl;
         std::cout << "OpenGL version: " << glGetString(GL_VERSION) << std::endl;
 
-        // Charger la texture depuis fichier
-        texture = loadTextureFromFile("data/textures/brickwall.jpg");
-
-        if (texture == 0) {
-            // Essayer d'autres noms de fichiers courants
-            const char* possibleFilenames[] = {
-                "brickwall.png",
-                "brick_wall.jpg",
-                "brick_wall.png",
-                "bricks.jpg",
-                "bricks.png",
-                "textures/brickwall.jpg",
-                "textures/brickwall.png",
-                "assets/brickwall.jpg",
-                "assets/brickwall.png"
-            };
-
-            for (const auto& filename : possibleFilenames) {
-                std::cout << "Essai de chargement de: " << filename << std::endl;
-                texture = loadTextureFromFile(filename);
-                if (texture != 0) break;
-            }
-        }
-
-        if (texture == 0) {
-            std::cerr << "ATTENTION: Aucune texture n'a pu être chargée. Utilisation d'une texture par défaut." << std::endl;
-        }
+        // Charger la texture existante
+        textureID = loadTexture("data/textures/brickwall.jpg");
 
         // Création des shaders
         shaderProgram = createShaderProgram();
@@ -517,24 +477,24 @@ private:
                              (void*)offsetof(Vertex, position));
         glEnableVertexAttribArray(0);
 
-        // Normale - location 1
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE,
-                             sizeof(Vertex),
-                             (void*)offsetof(Vertex, normal));
-        glEnableVertexAttribArray(1);
-
-        // Coordonnées de texture - location 2
-        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE,
+        // Coordonnées de texture - location 1
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE,
                              sizeof(Vertex),
                              (void*)offsetof(Vertex, texCoord));
+        glEnableVertexAttribArray(1);
+
+        // Normale - location 2
+        glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE,
+                             sizeof(Vertex),
+                             (void*)offsetof(Vertex, normal));
         glEnableVertexAttribArray(2);
 
         // Déliaison
         glBindBuffer(GL_ARRAY_BUFFER, 0);
-        glBindVertexArray(0);
+        glBindVertexArray(0); // L'EBO reste attaché
 
         // Configuration OpenGL 3D
-        glClearColor(0.1f, 0.1f, 0.15f, 1.0f);  // Fond plus foncé pour mieux voir
+        glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
 
         // Activer le test de profondeur
         glEnable(GL_DEPTH_TEST);
@@ -545,11 +505,7 @@ private:
         glCullFace(GL_BACK);
         glFrontFace(GL_CCW);
 
-        // Activer le blending pour la texture
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-        std::cout << "MultiTexturedCube3D initialized successfully!" << std::endl;
+        std::cout << "Textured MultiCube 3D initialized successfully!" << std::endl;
         std::cout << "Vertices par cube: " << cubeVertices.size() << std::endl;
         std::cout << "Indices par cube: " << cubeIndices.size() << std::endl;
     }
@@ -558,42 +514,45 @@ private:
         // Un cube unitaire centré à l'origine avec coordonnées de texture
         float half = 0.5f;
 
-        // Définir les sommets avec positions, normales et coordonnées de texture
-        // Face avant (Z positif)
-        cubeVertices.push_back({{-half, -half,  half}, {0, 0, 1}, {0, 0}}); // 0
-        cubeVertices.push_back({{ half, -half,  half}, {0, 0, 1}, {1, 0}}); // 1
-        cubeVertices.push_back({{ half,  half,  half}, {0, 0, 1}, {1, 1}}); // 2
-        cubeVertices.push_back({{-half,  half,  half}, {0, 0, 1}, {0, 1}}); // 3
+        // Définir les sommets avec positions et coordonnées de texture
+        // Chaque face a ses propres coordonnées UV
+        cubeVertices = {
+            // Face avant
+            {{-half, -half,  half}, {0.0f, 0.0f}, {0.0f, 0.0f, 1.0f}}, // 0
+            {{ half, -half,  half}, {1.0f, 0.0f}, {0.0f, 0.0f, 1.0f}}, // 1
+            {{ half,  half,  half}, {1.0f, 1.0f}, {0.0f, 0.0f, 1.0f}}, // 2
+            {{-half,  half,  half}, {0.0f, 1.0f}, {0.0f, 0.0f, 1.0f}}, // 3
 
-        // Face arrière (Z négatif)
-        cubeVertices.push_back({{ half, -half, -half}, {0, 0, -1}, {0, 0}}); // 4
-        cubeVertices.push_back({{-half, -half, -half}, {0, 0, -1}, {1, 0}}); // 5
-        cubeVertices.push_back({{-half,  half, -half}, {0, 0, -1}, {1, 1}}); // 6
-        cubeVertices.push_back({{ half,  half, -half}, {0, 0, -1}, {0, 1}}); // 7
+            // Face arrière
+            {{ half, -half, -half}, {0.0f, 0.0f}, {0.0f, 0.0f, -1.0f}}, // 4
+            {{-half, -half, -half}, {1.0f, 0.0f}, {0.0f, 0.0f, -1.0f}}, // 5
+            {{-half,  half, -half}, {1.0f, 1.0f}, {0.0f, 0.0f, -1.0f}}, // 6
+            {{ half,  half, -half}, {0.0f, 1.0f}, {0.0f, 0.0f, -1.0f}}, // 7
 
-        // Face droite (X positif)
-        cubeVertices.push_back({{ half, -half,  half}, {1, 0, 0}, {0, 0}}); // 8
-        cubeVertices.push_back({{ half, -half, -half}, {1, 0, 0}, {1, 0}}); // 9
-        cubeVertices.push_back({{ half,  half, -half}, {1, 0, 0}, {1, 1}}); // 10
-        cubeVertices.push_back({{ half,  half,  half}, {1, 0, 0}, {0, 1}}); // 11
+            // Face droite
+            {{ half, -half,  half}, {0.0f, 0.0f}, {1.0f, 0.0f, 0.0f}}, // 8
+            {{ half, -half, -half}, {1.0f, 0.0f}, {1.0f, 0.0f, 0.0f}}, // 9
+            {{ half,  half, -half}, {1.0f, 1.0f}, {1.0f, 0.0f, 0.0f}}, // 10
+            {{ half,  half,  half}, {0.0f, 1.0f}, {1.0f, 0.0f, 0.0f}}, // 11
 
-        // Face gauche (X négatif)
-        cubeVertices.push_back({{-half, -half, -half}, {-1, 0, 0}, {0, 0}}); // 12
-        cubeVertices.push_back({{-half, -half,  half}, {-1, 0, 0}, {1, 0}}); // 13
-        cubeVertices.push_back({{-half,  half,  half}, {-1, 0, 0}, {1, 1}}); // 14
-        cubeVertices.push_back({{-half,  half, -half}, {-1, 0, 0}, {0, 1}}); // 15
+            // Face gauche
+            {{-half, -half, -half}, {0.0f, 0.0f}, {-1.0f, 0.0f, 0.0f}}, // 12
+            {{-half, -half,  half}, {1.0f, 0.0f}, {-1.0f, 0.0f, 0.0f}}, // 13
+            {{-half,  half,  half}, {1.0f, 1.0f}, {-1.0f, 0.0f, 0.0f}}, // 14
+            {{-half,  half, -half}, {0.0f, 1.0f}, {-1.0f, 0.0f, 0.0f}}, // 15
 
-        // Face supérieure (Y positif)
-        cubeVertices.push_back({{-half,  half,  half}, {0, 1, 0}, {0, 0}}); // 16
-        cubeVertices.push_back({{ half,  half,  half}, {0, 1, 0}, {1, 0}}); // 17
-        cubeVertices.push_back({{ half,  half, -half}, {0, 1, 0}, {1, 1}}); // 18
-        cubeVertices.push_back({{-half,  half, -half}, {0, 1, 0}, {0, 1}}); // 19
+            // Face supérieure
+            {{-half,  half,  half}, {0.0f, 0.0f}, {0.0f, 1.0f, 0.0f}}, // 16
+            {{ half,  half,  half}, {1.0f, 0.0f}, {0.0f, 1.0f, 0.0f}}, // 17
+            {{ half,  half, -half}, {1.0f, 1.0f}, {0.0f, 1.0f, 0.0f}}, // 18
+            {{-half,  half, -half}, {0.0f, 1.0f}, {0.0f, 1.0f, 0.0f}}, // 19
 
-        // Face inférieure (Y négatif)
-        cubeVertices.push_back({{-half, -half, -half}, {0, -1, 0}, {0, 0}}); // 20
-        cubeVertices.push_back({{ half, -half, -half}, {0, -1, 0}, {1, 0}}); // 21
-        cubeVertices.push_back({{ half, -half,  half}, {0, -1, 0}, {1, 1}}); // 22
-        cubeVertices.push_back({{-half, -half,  half}, {0, -1, 0}, {0, 1}}); // 23
+            // Face inférieure
+            {{-half, -half, -half}, {0.0f, 0.0f}, {0.0f, -1.0f, 0.0f}}, // 20
+            {{ half, -half, -half}, {1.0f, 0.0f}, {0.0f, -1.0f, 0.0f}}, // 21
+            {{ half, -half,  half}, {1.0f, 1.0f}, {0.0f, -1.0f, 0.0f}}, // 22
+            {{-half, -half,  half}, {0.0f, 1.0f}, {0.0f, -1.0f, 0.0f}}  // 23
+        };
 
         // Indices pour 12 triangles (2 triangles par face × 6 faces)
         cubeIndices = {
@@ -630,8 +589,8 @@ private:
         if (VAO != 0) glDeleteVertexArrays(1, &VAO);
         if (VBO != 0) glDeleteBuffers(1, &VBO);
         if (EBO != 0) glDeleteBuffers(1, &EBO);
-        if (texture != 0) glDeleteTextures(1, &texture);
         if (shaderProgram != 0) glDeleteProgram(shaderProgram);
+        if (textureID != 0) glDeleteTextures(1, &textureID);
     }
 
     GLuint compileShader(GLenum type, const std::string& source) {
@@ -654,20 +613,20 @@ private:
     }
 
     GLuint createShaderProgram() {
-        std::cout << "Creating TexturedCube shader program..." << std::endl;
+        std::cout << "Creating Textured MultiCube shader program..." << std::endl;
 
-        // Vertex Shader avec textures
+        // Vertex Shader avec coordonnées de texture
         std::string vertexSource = R"(
             #version 300 es
             precision mediump float;
 
             layout(location = 0) in vec3 aPosition;
-            layout(location = 1) in vec3 aNormal;
-            layout(location = 2) in vec2 aTexCoord;
+            layout(location = 1) in vec2 aTexCoord;
+            layout(location = 2) in vec3 aNormal;
 
+            out vec2 vTexCoord;
             out vec3 vNormal;
             out vec3 vFragPos;
-            out vec2 vTexCoord;
 
             uniform mat4 uModel;
             uniform mat4 uView;
@@ -682,11 +641,11 @@ private:
                 // Transformation finale (espace clip)
                 gl_Position = uProjection * uView * worldPos;
 
-                // Transformation de la normale
-                vNormal = mat3(uModel) * aNormal;
-
                 // Passer les coordonnées de texture
                 vTexCoord = aTexCoord;
+
+                // Transformation de la normale
+                vNormal = mat3(uModel) * aNormal;
             }
         )";
 
@@ -695,9 +654,9 @@ private:
             #version 300 es
             precision mediump float;
 
+            in vec2 vTexCoord;
             in vec3 vNormal;
             in vec3 vFragPos;
-            in vec2 vTexCoord;
 
             layout(location = 0) out vec4 outColor;
 
@@ -705,36 +664,39 @@ private:
             uniform sampler2D uTexture;
 
             void main() {
+                // Échantillonner la texture
+                vec4 texColor = texture(uTexture, vTexCoord);
+
                 // Normaliser la normale
                 vec3 normal = normalize(vNormal);
 
                 // Direction de la lumière principale
-                vec3 lightDir = normalize(vec3(1.0, 1.0, 0.5));
+                vec3 lightDir1 = normalize(vec3(1.0, 1.0, 0.5));
 
-                // Calcul de l'éclairage diffus
-                float diff = max(dot(normal, lightDir), 0.0);
+                // Deuxième source de lumière pour un effet plus intéressant
+                vec3 lightDir2 = normalize(vec3(-0.5, 0.8, -0.3));
+
+                // Calcul des éclairages diffus
+                float diff1 = max(dot(normal, lightDir1), 0.0);
+                float diff2 = max(dot(normal, lightDir2), 0.0) * 0.5;
 
                 // Éclairage ambiant
-                float ambient = 0.4;
-
-                // Éclairage spéculaire simple
-                vec3 viewDir = normalize(vec3(0, 0, 5) - vFragPos);
-                vec3 reflectDir = reflect(-lightDir, normal);
-                float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0) * 0.2;
+                float ambient = 0.3;
 
                 // Combinaison des éclairages
-                float lighting = ambient + diff + spec;
+                float lighting = ambient + diff1 + diff2;
 
-                // Échantillonner la texture
-                vec4 texColor = texture(uTexture, vTexCoord);
-
-                // Appliquer l'éclairage à la texture
+                // Appliquer l'éclairage à la couleur de la texture
                 vec3 result = texColor.rgb * lighting;
+
+                // Effet de pulsation très subtil
+                float pulse = 0.95 + 0.05 * sin(uTime * 0.5);
+                result *= pulse;
 
                 // Gamma correction
                 result = pow(result, vec3(1.0 / 2.2));
 
-                outColor = vec4(result, 1.0);
+                outColor = vec4(result, texColor.a);
             }
         )";
 
@@ -764,65 +726,67 @@ private:
         timeUniformLoc = glGetUniformLocation(program, "uTime");
         textureUniformLoc = glGetUniformLocation(program, "uTexture");
 
-        std::cout << "Shader TexturedCube créé avec succès!" << std::endl;
+        std::cout << "Shader Textured MultiCube créé avec succès!" << std::endl;
 
         return program;
     }
 
-    // Données du cube avec coordonnées de texture
+    // Données du cube de base avec texture
     std::vector<Vertex> cubeVertices;
     std::vector<GLuint> cubeIndices;
 };
 
-std::unique_ptr<MultiTexturedCube3D> g_multiTexturedCube3D;
+std::unique_ptr<TexturedMultiCube3D> g_texturedMultiCube3D;
 
 int main() {
     try {
         std::cout << "========================================" << std::endl;
-        std::cout << "CUBES TEXTURÉS 3D - ROTATION SUR PLACE" << std::endl;
+        std::cout << "MULTI-CUBE TEXTURÉ 3D - OpenGL" << std::endl;
         std::cout << "========================================" << std::endl;
         std::cout << "Caractéristiques:" << std::endl;
-        std::cout << " - 9 cubes en grille 3x3" << std::endl;
-        std::cout << " - Chaque cube tourne sur SON PROPRE centre" << std::endl;
-        std::cout << " - Texture PNG/JPG sur toutes les faces" << std::endl;
+        std::cout << " - 12 cubes à différentes positions" << std::endl;
+        std::cout << " - Texture 'textures/brickwall.jpg' sur toutes les faces" << std::endl;
+        std::cout << " - Pas de couleurs différentes (uniquement texture)" << std::endl;
         std::cout << " - Rotations indépendantes sur 3 axes" << std::endl;
-        std::cout << " - Éclairage diffus + ambiant + spéculaire" << std::endl;
-        std::cout << " - Caméra orbitale autour de la scène" << std::endl;
+        std::cout << " - Échelles variées" << std::endl;
+        std::cout << " - Caméra orbitale automatique" << std::endl;
+        std::cout << " - Éclairage avec deux sources" << std::endl;
+        std::cout << " - Test de profondeur (Z-buffer)" << std::endl;
         std::cout << "========================================" << std::endl;
 
         // Configuration de la fenêtre
         common::WindowConfig config;
         config.width = 800;
         config.height = 600;
-        config.title = "Cubes Texturés 3D - Rotation sur place";
+        config.title = "Textured Multi-Cube 3D - OpenGL";
         config.renderer = common::WindowConfig::RendererType::OPENGL;
         config.fixed_dt = 1.0f / 60.0f;
         common::SetWindowConfig(config);
 
-        // Création de l'application
-        g_multiTexturedCube3D = std::make_unique<MultiTexturedCube3D>();
+        // Création de l'application multi-cube texturée
+        g_texturedMultiCube3D = std::make_unique<TexturedMultiCube3D>();
 
         // Enregistrement dans le moteur
-        common::SystemObserverSubject::AddObserver(g_multiTexturedCube3D.get());
-        common::DrawObserverSubject::AddObserver(g_multiTexturedCube3D.get());
+        common::SystemObserverSubject::AddObserver(g_texturedMultiCube3D.get());
+        common::DrawObserverSubject::AddObserver(g_texturedMultiCube3D.get());
 
         // Lancement du moteur
         common::RunEngine();
 
         // Nettoyage
-        common::SystemObserverSubject::RemoveObserver(g_multiTexturedCube3D.get());
-        common::DrawObserverSubject::RemoveObserver(g_multiTexturedCube3D.get());
-        g_multiTexturedCube3D.reset();
+        common::SystemObserverSubject::RemoveObserver(g_texturedMultiCube3D.get());
+        common::DrawObserverSubject::RemoveObserver(g_texturedMultiCube3D.get());
+        g_texturedMultiCube3D.reset();
 
-        std::cout << "\nProgramme Cubes Texturés 3D terminé avec succès!" << std::endl;
+        std::cout << "\nProgramme Multi-Cube Texturé 3D terminé avec succès!" << std::endl;
 
     } catch (const std::exception& e) {
         std::cerr << "\nERREUR: " << e.what() << std::endl;
 
-        if (g_multiTexturedCube3D) {
-            common::SystemObserverSubject::RemoveObserver(g_multiTexturedCube3D.get());
-            common::DrawObserverSubject::RemoveObserver(g_multiTexturedCube3D.get());
-            g_multiTexturedCube3D.reset();
+        if (g_texturedMultiCube3D) {
+            common::SystemObserverSubject::RemoveObserver(g_texturedMultiCube3D.get());
+            common::DrawObserverSubject::RemoveObserver(g_texturedMultiCube3D.get());
+            g_texturedMultiCube3D.reset();
         }
         return -1;
     }
