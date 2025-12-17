@@ -9,7 +9,11 @@ set(CMAKE_TOOLCHAIN_FILE "C:/Users/forna/.vcpkg-clion/vcpkg/scripts/buildsystems
 
 # Recherche des dépendances OpenGL
 find_package(OpenGL REQUIRED)
+# Recherche d'Assimp
+find_package(assimp CONFIG REQUIRED)
 
+# Définition pour STB_IMAGE
+add_definitions(-DSTB_IMAGE_IMPLEMENTATION)
 
 include(cmake/data.cmake)
 include(cmake/shaders.cmake)
@@ -19,13 +23,16 @@ add_subdirectory(externals/GPR924-Engine)
 file(GLOB_RECURSE SRC_FILE src/*.cc include/*.h)
 
 add_library(CompGraphLib STATIC ${SRC_FILE})
-target_include_directories(CompGraphLib PUBLIC include ${CMAKE_CURRENT_SOURCE_DIR}/third_party)  # Ajoutez ce chemin
-target_link_libraries(CompGraphLib PUBLIC common)
-
-
+target_include_directories(CompGraphLib PUBLIC
+        include
+        ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+        ${ASSIMP_INCLUDE_DIRS}  # Ajouté
+)
+target_link_libraries(CompGraphLib PUBLIC common assimp::assimp)  # Ajouté
 
 checkshaders("${CMAKE_SOURCE_DIR}" CompGraphLib)
 copydata("${CMAKE_SOURCE_DIR}" CompGraphLib)
+
 
 # Création manuelle de TOUS les exécutables
 
@@ -74,9 +81,7 @@ add_executable(cube_lighting_maps main/main_lighting_maps.cc)
 target_link_libraries(cube_lighting_maps PUBLIC CompGraphLib)
 
 # Sample 12: Cubes rotation with directional light
-add_executable(cube_directional_light main/main_directional_light.cc
-        main/main_flash_light.cc
-        main/main_spot_light.cc)
+add_executable(cube_directional_light main/main_directional_light.cc)
 target_link_libraries(cube_directional_light PUBLIC CompGraphLib)
 
 # Sample 13: Cubes rotation with point light attenuation
@@ -90,6 +95,11 @@ target_link_libraries(cube_flash_light PUBLIC CompGraphLib)
 # Sample 15: Cubes rotation with spot light
 add_executable(cube_spot_light main/main_spot_light.cc)
 target_link_libraries(cube_spot_light PUBLIC CompGraphLib)
+
+# Sample 16: Cubes rotation with spot light and camera manual control
+add_executable(model_demo main/main_model_demo.cc
+        src/model_loader.cc)
+target_link_libraries(model_demo PUBLIC CompGraphLib assimp::assimp)
 
 # Option 2: Boucle automatique pour les autres fichiers main (sauf ceux déjà créés)
 
@@ -111,7 +121,9 @@ foreach(main_file ${ALL_MAIN_FILES})
         message(STATUS "Creating executable ${target} from ${main_file}")
 
         add_executable(${target} ${main_file}
-                include/Shader.h)
+                include/Shader.h
+                include/input.h
+                include/model_loader.h)
         target_link_libraries(${target} PUBLIC CompGraphLib)
     endif()
 endforeach()
