@@ -81,7 +81,8 @@ add_executable(cube_lighting_maps main/main_lighting_maps.cc)
 target_link_libraries(cube_lighting_maps PUBLIC CompGraphLib)
 
 # Sample 12: Cubes rotation with directional light
-add_executable(cube_directional_light main/main_directional_light.cc)
+add_executable(cube_directional_light main/main_directional_light.cc
+        main/main_skybox_demo.cc)
 target_link_libraries(cube_directional_light PUBLIC CompGraphLib)
 
 # Sample 13: Cubes rotation with point light attenuation
@@ -96,8 +97,13 @@ target_link_libraries(cube_flash_light PUBLIC CompGraphLib)
 add_executable(cube_spot_light main/main_spot_light.cc)
 target_link_libraries(cube_spot_light PUBLIC CompGraphLib)
 
-# Sample 16: Cubes rotation with spot light and camera manual control
+# Sample 16: Model with spot light and camera manual control
 add_executable(model_demo main/main_model_demo.cc
+        src/model_loader.cc)
+target_link_libraries(model_demo PUBLIC CompGraphLib assimp::assimp)
+
+# Sample 17: Model with Skybox
+add_executable(skybox_demo main/main_skybox_demo.cc
         src/model_loader.cc)
 target_link_libraries(model_demo PUBLIC CompGraphLib assimp::assimp)
 

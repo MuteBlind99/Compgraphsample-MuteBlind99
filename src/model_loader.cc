@@ -193,12 +193,12 @@ std::vector<Texture> Model::loadMaterialTextures(aiMaterial* mat,
     std::vector<Texture> textures;
 
     for (unsigned int i = 0; i < mat->GetTextureCount(type); i++) {
-        aiString str;
-        mat->GetTexture(type, i, &str);
+        aiString material_texture_path;
+        mat->GetTexture(type, i, &material_texture_path);
 
         bool skip = false;
         for (unsigned int j = 0; j < textures_loaded.size(); j++) {
-            if (std::strcmp(textures_loaded[j].path.C_Str(), str.C_Str()) == 0) {
+            if (std::strcmp(textures_loaded[j].path.C_Str(), material_texture_path.C_Str()) == 0) {
                 textures.push_back(textures_loaded[j]);
                 skip = true;
                 break;
@@ -207,9 +207,9 @@ std::vector<Texture> Model::loadMaterialTextures(aiMaterial* mat,
 
         if (!skip) {
             Texture texture;
-            texture.id = TextureFromFile(str.C_Str(), directory);
+            texture.id = TextureFromFile(material_texture_path.C_Str(), directory);
             texture.type = typeName;
-            texture.path = str;
+            texture.path = material_texture_path;
             textures.push_back(texture);
             textures_loaded.push_back(texture);
         }
@@ -249,8 +249,8 @@ GLuint Model::TextureFromFile(const char* path, const std::string& directory) {
 
         stbi_image_free(data);
     } else {
-        std::cout << "Texture failed to load at path: " << path << std::endl;
-        stbi_image_free(data);
+        std::cerr << "Texture failed to load at path: " << path << std::endl;
+
     }
 
     return textureID;

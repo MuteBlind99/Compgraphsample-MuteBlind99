@@ -41,9 +41,9 @@ public:
         if (lightAngle > 360.0f) lightAngle -= 360.0f;
 
         // Position de la lumière qui tourne
-        lightPos[0] = 5.0f * sinf(lightAngle * M_PI / 180.0f);
+        lightPos[0] = 5.0f * std::sin(lightAngle * std::numbers::pi_v<float> / 180.0f);
         lightPos[1] = 3.0f;
-        lightPos[2] = 5.0f * cosf(lightAngle * M_PI / 180.0f);
+        lightPos[2] = 5.0f * cosf(lightAngle * M_PI / 180.0f);//*
 
         // Animation de la caméra
         cameraAngle += 5.0f * dt;
