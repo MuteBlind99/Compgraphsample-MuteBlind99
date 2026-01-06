@@ -6,12 +6,11 @@
 
 #include <vector>
 #include <string>
-#include <map>
-#include <memory>
 #include "third_party/gl_include.h"
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
-#include <assimp/postprocess.h>
+
+#include "maths/vec3.h"
 
 struct Vertex {
     float position[3];
@@ -37,16 +36,26 @@ struct Mesh {
 
 class Model {
 public:
-    Model(const std::string& path) {
+    explicit Model(const std::string& path) {
         loadModel(path);
     }
 
     void Draw(GLuint shaderProgram);
 
+    core::Vec3F aabbMin;
+    core::Vec3F aabbMax;
+
+    [[nodiscard]] core::Vec3F GetCenter() const;
+    [[nodiscard]] float GetBoundingRadius() const;
+
+    float GetMinY() const{return aabbMin.y;}
+
 private:
     std::vector<Mesh> meshes;
     std::string directory;
     std::vector<Texture> textures_loaded;
+
+
 
     void loadModel(const std::string& path);
     void processNode(aiNode* node, const aiScene* scene);
@@ -54,5 +63,6 @@ private:
     std::vector<Texture> loadMaterialTextures(aiMaterial* mat,
                                              aiTextureType type,
                                              const std::string& typeName);
-    GLuint TextureFromFile(const char* path, const std::string& directory);
+
+    static GLuint TextureFromFile(const char* path, const std::string& directory);
 };

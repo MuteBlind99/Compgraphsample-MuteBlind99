@@ -3,7 +3,11 @@
 //
 #include "model_loader.h"
 #include <iostream>
+#define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
+#include <assimp/postprocess.h>
+#include <algorithm>
+#include <cfloat>
 
 void Mesh::setupMesh() {
     glGenVertexArrays(1, &VAO);
@@ -82,8 +86,19 @@ void Model::Draw(GLuint shaderProgram) {
     }
 }
 
+core::Vec3F Model::GetCenter() const {
+    return (aabbMin+aabbMax)*0.5f;
+}
+
+float Model::GetBoundingRadius() const {
+    core::Vec3F size = aabbMax - aabbMin;
+    return 0.5f * size.magnitude();
+}
+
 void Model::loadModel(const std::string& path) {
     Assimp::Importer importer;
+    aabbMin = core::Vec3F( FLT_MAX, FLT_MAX, FLT_MAX);
+    aabbMax = core::Vec3F( -FLT_MAX, -FLT_MAX, -FLT_MAX);
     const aiScene* scene = importer.ReadFile(path,
         aiProcess_Triangulate |
         aiProcess_FlipUVs |
@@ -125,6 +140,14 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene) {
         vertex.position[0] = mesh->mVertices[i].x;
         vertex.position[1] = mesh->mVertices[i].y;
         vertex.position[2] = mesh->mVertices[i].z;
+
+        aabbMin.x = std::min(aabbMin.x, vertex.position[0]);
+        aabbMin.y = std::min(aabbMin.y, vertex.position[1]);
+        aabbMin.z = std::min(aabbMin.z, vertex.position[2]);
+
+        aabbMax.x = std::max(aabbMax.x, vertex.position[0]);
+        aabbMax.y = std::max(aabbMax.y, vertex.position[1]);
+        aabbMax.z = std::max(aabbMax.z, vertex.position[2]);
 
         // Normals
         if (mesh->HasNormals()) {

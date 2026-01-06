@@ -13,7 +13,7 @@ find_package(OpenGL REQUIRED)
 find_package(assimp CONFIG REQUIRED)
 
 # Définition pour STB_IMAGE
-add_definitions(-DSTB_IMAGE_IMPLEMENTATION)
+#add_definitions(-DSTB_IMAGE_IMPLEMENTATION)
 
 include(cmake/data.cmake)
 include(cmake/shaders.cmake)
