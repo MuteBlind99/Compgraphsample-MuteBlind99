@@ -70,7 +70,11 @@ void Mesh::Draw(GLuint shaderProgram) {
         // And finally bind the texture
         glBindTexture(GL_TEXTURE_2D, textures[i].id);
     }
-
+    for (int u = 2; u < 8; ++u) {
+        glActiveTexture(GL_TEXTURE0+u);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+    glActiveTexture(GL_TEXTURE0);
     // Draw mesh
     glBindVertexArray(VAO);
     glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);

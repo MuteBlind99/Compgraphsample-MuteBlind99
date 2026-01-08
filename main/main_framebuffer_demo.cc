@@ -175,9 +175,9 @@ public:
 
 private:
     float time_ = 0.0f;
-    float lightPos[3] = {2.0f, 3.0f, 3.0f};
-    float camPos_[3] = {3.0f, 0.0f, 3.0f};
-    float camFront_[3] = {0.0f, 0.0f, -1.0f};
+    float lightPos[3] = {3.0f, 3.0f, 3.0f};
+    float camPos_[3] = {0.0f, 0.0f, 3.0f};
+    float camFront_[3] = {0.0f, 0.0f, 1.0f};
     float camUp_[3] = {0.0f, 1.0f, 0.0f};
 
     float yaw_ = -90.0f; // regarde vers -Z
@@ -471,7 +471,7 @@ private:
         glGenBuffers(1, &quadVBO_);
         glBindVertexArray(quadVAO_);
         glBindBuffer(GL_ARRAY_BUFFER, quadVBO_);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(quad), quad, GL_STATIC_DRAW);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(quad), &quad, GL_STATIC_DRAW);
 
         glEnableVertexAttribArray(0);
         glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
@@ -803,7 +803,14 @@ private:
         // Rendu du modèle
         glUseProgram(modelProgram_);
 
-        GLint loc = glGetUniformLocation(modelProgram_, "uViewPos");
+        GLint loc;
+        loc = glGetUniformLocation(modelProgram_, "uLightColor");
+        if (loc >= 0) glUniform3f(loc, 1.0f, 1.0f, 1.0f);
+
+        loc = glGetUniformLocation(modelProgram_, "uMaterialShininess");
+        if (loc >= 0) glUniform1f(loc, 32.0f);
+        
+        loc = glGetUniformLocation(modelProgram_, "uViewPos");
         if (loc >= 0) glUniform3f(loc, camX, camY, camZ);
 
         loc = glGetUniformLocation(modelProgram_, "uLightPos");
@@ -813,7 +820,12 @@ private:
         glUniformMatrix4fv(glGetUniformLocation(modelProgram_, "uView"), 1, GL_FALSE, view);
         glUniformMatrix4fv(glGetUniformLocation(modelProgram_, "uProj"), 1, GL_FALSE, proj);
 
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LESS);
+        glDepthMask(GL_TRUE);
+        glDisable(GL_BLEND);
         model_->Draw(modelProgram_);
+        glEnable(GL_BLEND);
 
         // Rendu du skybox
         glDepthFunc(GL_LEQUAL);
@@ -942,31 +954,37 @@ private:
     }
 
 
-    GLuint createModelShaderProgram() {
+    static GLuint createModelShaderProgram() {
     // Vertex Shader
     const char *vertexSource = R"(
-        #version 300 es
-        precision mediump float;
+         #version 300 es
+    precision mediump float;
 
-        layout(location = 0) in vec3 aPosition;
-        layout(location = 1) in vec3 aNormal;
-        layout(location = 2) in vec2 aTexCoord;
+    layout(location = 0) in vec3 aPosition;
+    layout(location = 1) in vec3 aNormal;
+    layout(location = 2) in vec2 aTexCoord;
 
-        out vec3 FragPos;
-        out vec3 Normal;
-        out vec2 TexCoord;
+    out vec3 FragPos;
+    out vec3 Normal;
+    out vec2 TexCoord;
 
-        uniform mat4 uModel;
-        uniform mat4 uView;
-        uniform mat4 uProj;
+    uniform mat4 uModel;
+    uniform mat4 uView;
+    uniform mat4 uProj;
 
-        void main() {
-            FragPos = vec3(uModel * vec4(aPosition, 1.0));
-            Normal = mat3(transpose(inverse(uModel))) * aNormal;
-            TexCoord = aTexCoord;
-            gl_Position = uProj * uView * vec4(FragPos, 1.0);
-        }
-    )";
+    void main() {
+        FragPos = vec3(uModel * vec4(aPosition, 1.0));
+
+        // SIMPLIFIÉ: pas de transformation inverse/transpose
+        Normal = normalize(mat3(uModel) * aNormal);
+
+        // OU: utiliser directement les normales du modèle
+        Normal = normalize(aNormal);
+
+        TexCoord = aTexCoord;
+        gl_Position = uProj * uView * vec4(FragPos, 1.0);
+    }
+)";
 
      // UTILISEZ CE SHADER POUR DEBUG
     const char *fragmentSource = R"(
@@ -1006,7 +1024,8 @@ private:
                 // Afficher seulement la composante diffuse
                 vec3 norm = normalize(Normal);
                 vec3 lightDir = normalize(uLightPos - FragPos);
-                float diff = max(dot(norm, lightDir), 0.0);
+                float NdotL = dot(norm, lightDir);
+                float diff = abs(NdotL); // Utiliser la valeur absolue
                 FragColor = vec4(vec3(diff), 1.0);
                 return;
             }
@@ -1030,7 +1049,7 @@ private:
             }
 
             // Ambient FORCÉ (même si lumière éteinte)
-            vec3 ambient = diffuseColor * 0.8; // 30% d'ambient minimum
+            vec3 ambient = diffuseColor * 0.8; // 80% d'ambient minimum
 
             // Diffuse
             vec3 norm = normalize(Normal);
@@ -1042,7 +1061,7 @@ private:
             vec3 viewDir = normalize(uViewPos - FragPos);
             vec3 reflectDir = reflect(-lightDir, norm);
             float spec = pow(max(dot(viewDir, reflectDir), 0.0), uMaterialShininess);
-            vec3 specular = uLightColor * spec * 0.3;
+            vec3 specular = uLightColor * spec * 0.8;
 
             // Résultat avec ambient garanti
             vec3 result = ambient + diffuse + specular;
@@ -1106,12 +1125,16 @@ private:
         glEnable(GL_DEPTH_TEST);
         glDepthFunc(GL_LESS);
 
-        // Activer le blending pour la transparence
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
         glEnable(GL_CULL_FACE);
-        glCullFace(GL_BACK);
+        glCullFace(GL_BACK); // Cacher les faces arrière
+        glFrontFace(GL_CCW); // Sens antihoraire = face avant
+
+        // // Activer le blending pour la transparence
+        // glEnable(GL_BLEND);
+        // glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        // glEnable(GL_CULL_FACE);
+        // glCullFace(GL_BACK);
     }
 
     void createSkyboxRessources() {

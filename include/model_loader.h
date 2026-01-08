@@ -54,6 +54,7 @@ private:
     std::vector<Mesh> meshes;
     std::string directory;
     std::vector<Texture> textures_loaded;
+    static GLuint gWhiteTex;
 
 
 
