@@ -105,7 +105,11 @@ target_link_libraries(model_demo PUBLIC CompGraphLib assimp::assimp)
 # Sample 17: Model with Skybox
 add_executable(skybox_demo main/main_skybox_demo.cc
         src/model_loader.cc)
-target_link_libraries(model_demo PUBLIC CompGraphLib assimp::assimp)
+target_link_libraries(skybox_demo PUBLIC CompGraphLib assimp::assimp)
+
+add_executable(framebuffer_demo main/main_framebuffer_demo.cc
+        src/model_loader.cc)
+target_link_libraries(framebuffer_demo PUBLIC CompGraphLib assimp::assimp)
 
 # Option 2: Boucle automatique pour les autres fichiers main (sauf ceux déjà créés)
 
