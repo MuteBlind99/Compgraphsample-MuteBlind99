@@ -81,8 +81,7 @@ add_executable(cube_lighting_maps main/main_lighting_maps.cc)
 target_link_libraries(cube_lighting_maps PUBLIC CompGraphLib)
 
 # Sample 12: Cubes rotation with directional light
-add_executable(cube_directional_light main/main_directional_light.cc
-        main/main_skybox_demo.cc)
+add_executable(cube_directional_light main/main_directional_light.cc)
 target_link_libraries(cube_directional_light PUBLIC CompGraphLib)
 
 # Sample 13: Cubes rotation with point light attenuation
@@ -110,6 +109,10 @@ target_link_libraries(skybox_demo PUBLIC CompGraphLib assimp::assimp)
 add_executable(framebuffer_demo main/main_framebuffer_demo.cc
         src/model_loader.cc)
 target_link_libraries(framebuffer_demo PUBLIC CompGraphLib assimp::assimp)
+
+add_executable(frustrum_culling_demo main/main_frustrum_culling.cc
+src/model_loader.cc)
+target_link_libraries(frustrum_culling_demo PUBLIC CompGraphLib assimp::assimp)
 
 # Option 2: Boucle automatique pour les autres fichiers main (sauf ceux déjà créés)
 

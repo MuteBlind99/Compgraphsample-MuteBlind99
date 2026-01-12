@@ -1,5 +1,5 @@
 //
-// Created by forna on 06.01.2026.
+// Created by forna on 09.01.2026.
 //
 #include <iostream>
 #include <memory>
@@ -73,6 +73,8 @@ public:
 
         // Initialiser les matrices de convolution
         initConvolutionKernels();
+        initCubeResources();
+        createCubeLine();
 
         // Initialiser ImGui si disponible
 #ifdef IMGUI_ENABLED
@@ -267,29 +269,153 @@ private:
     GLuint skyboxVBO_ = 0;
     GLuint cubemapTex_ = 0;
 
+    // CUBES
+    GLuint cubeProgram_ = 0;
+    GLuint cubeVAO_ = 0, cubeVBO_ = 0, cubeEBO_ = 0;
+    GLsizei cubeIndexCount_ = 0;
+
+    std::vector<core::Vec3F> cubeCenters_;
+    float cubeHalfSize_ = 0.5f;   // AABB = center ± halfSize
+
+    int drawnCubes_ = 0;          // debug (combien dessinés après culling)
+
     // Modèle
     std::unique_ptr<Model> model_;
 
-    // //--- Model ---
-    // std::unique_ptr<Model> model_;
-    // GLuint modelProgram_ = 0;
-    //
-    // //FBO
-    // int width_ = 800;
-    // int height_ = 600;
-    //
-    // GLuint fbo_ = 0;
-    // GLuint colorTex_ = 0;
-    // GLuint rboDepthStencil_ = 0;
-    //
-    // GLuint quadVAO_ = 0;
-    // GLuint quadVBO_ = 0;
-    //
-    // GLuint postProgram_ = 0;
-    // int postMode_ = 0;
-    //
-    // std::string postVS_;
-    // std::string postFS_;
+    struct Plane {
+        core::Vec3F n;
+        float d{}; // distance (ax+by+cz+d=0)
+        [[nodiscard]] float distance(const core::Vec3F& p)const {
+            return n.x*p.x + n.y*p.y +n.z*p.z+d;
+        }
+    };
+
+    struct Frustrum {
+        Plane p[6]; // 0:L 1:R 2:B 3:T 4:N 5:F
+    };
+    struct AABB {
+        core::Vec3F mn;
+        core::Vec3F mx;
+    };
+    static void normalizePlane(Plane& pl) {
+        float len =std::sqrt(pl.n.x* pl.n.x + pl.n.y* pl.n.y + pl.n.z* pl.n.z);
+        if (len> 0.0f) {
+            pl.n.x/=len; pl.n.y/=len; pl.n.z/=len;
+            pl.d /=len;
+        }
+    }
+    static float mrc(const float* m, int row, int col) {return m[col*4+row];}
+
+    static Frustrum exractFrustrum(const float* proj, const float* view) {
+        float vp[16];
+        multiplyMat4(vp,proj, view);
+
+        Frustrum f;
+        auto makePlane=[&](int signRow, int axisRow)->Plane {
+            Plane pl;
+            pl.n.x = mrc(vp, 3, 0) + signRow * mrc(vp, axisRow, 0);
+            pl.n.y = mrc(vp, 3, 1) + signRow * mrc(vp, axisRow, 1);
+            pl.n.z = mrc(vp, 3, 2) + signRow * mrc(vp, axisRow, 2);
+            pl.d   = mrc(vp, 3, 3) + signRow * mrc(vp, axisRow, 3);
+            normalizePlane(pl);
+            return pl;
+        };
+
+        f.p[0] = makePlane(+1, 0); // Left  = row3 + row0
+        f.p[1] = makePlane(-1, 0); // Right = row3 - row0
+        f.p[2] = makePlane(+1, 1); // Bottom
+        f.p[3] = makePlane(-1, 1); // Top
+        f.p[4] = makePlane(+1, 2); // Near
+        f.p[5] = makePlane(-1, 2); // Far
+        return f;
+    }
+    // Test AABB vs frustum
+    static bool aabbInFrustum(const Frustrum& f, const AABB& b) {
+        for (int i=0;i <6; ++i) {
+            const Plane& p= f.p[i];
+
+            core::Vec3F v;
+            v.x = (p.n.x >= 0.0f) ? b.mx.x : b.mn.x;
+            v.y = (p.n.y >= 0.0f) ? b.mx.y : b.mn.y;
+            v.z = (p.n.z >= 0.0f) ? b.mx.z : b.mn.z;
+
+            if (p.distance(v) < 0.0f) return false;
+        }
+        return true;
+    }
+    void initCubeResources() {
+        const std::string vs = R"(
+        #version 300 es
+        precision highp float;
+        layout(location=0) in vec3 aPos;
+
+        uniform mat4 uModel;
+        uniform mat4 uView;
+        uniform mat4 uProj;
+
+        void main(){
+            gl_Position = uProj * uView * uModel * vec4(aPos, 1.0);
+        }
+    )";
+
+        const std::string fs = R"(
+        #version 300 es
+        precision mediump float;
+        out vec4 FragColor;
+        uniform vec3 uColor;
+        void main(){
+            FragColor = vec4(uColor, 1.0);
+        }
+    )";
+
+        cubeProgram_ = createProgram(vs, fs);
+
+        // Cube géométrie (positions only) + indices
+        const float h = 0.5f;
+        const float vertices[] = {
+            -h,-h,-h,  +h,-h,-h,  +h,+h,-h,  -h,+h,-h, // back
+            -h,-h,+h,  +h,-h,+h,  +h,+h,+h,  -h,+h,+h  // front
+        };
+
+        const unsigned int indices[] = {
+            0,1,2, 2,3,0, // back
+            4,5,6, 6,7,4, // front
+            0,4,7, 7,3,0, // left
+            1,5,6, 6,2,1, // right
+            3,2,6, 6,7,3, // top
+            0,1,5, 5,4,0  // bottom
+        };
+        cubeIndexCount_ = (GLsizei)(sizeof(indices)/sizeof(indices[0]));
+
+        glGenVertexArrays(1, &cubeVAO_);
+        glGenBuffers(1, &cubeVBO_);
+        glGenBuffers(1, &cubeEBO_);
+
+        glBindVertexArray(cubeVAO_);
+
+        glBindBuffer(GL_ARRAY_BUFFER, cubeVBO_);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, cubeEBO_);
+        glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3*sizeof(float), (void*)0);
+
+        glBindVertexArray(0);
+    }
+    void createCubeLine() {
+        cubeCenters_.clear();
+
+        // 101 cubes alignés sur X, devant le modèle
+        for (int i = -50; i <= 50; ++i) {
+            cubeCenters_.push_back(core::Vec3F{
+                target_[0] + i * 2.0f,
+                target_[1],
+                target_[2] - 15.0f
+            });
+        }
+    }
 
     static void identityMatrix(float *m) {
         for (int i = 0; i < 16; i++) m[i] = 0.0f;
@@ -767,6 +893,8 @@ private:
 
         // Calcul des matrices
         float view[16], proj[16], modelMat[16];
+        Frustrum fr = exractFrustrum(proj, view);
+        drawnCubes_=0;
 
         float yawRad = yaw_ * 3.1415926535f / 180.0f;
         float pitchRad = pitch_ * 3.1415926535f / 180.0f;
@@ -827,6 +955,33 @@ private:
         model_->Draw(modelProgram_);
         glEnable(GL_BLEND);
 
+        //Cube
+        glUseProgram(cubeProgram_);
+        glUniformMatrix4fv(glGetUniformLocation(cubeProgram_,"uView"),1,GL_FALSE,view);
+        glUniformMatrix4fv(glGetUniformLocation(cubeProgram_,"uProj"),1,GL_FALSE,proj);
+        glUniform3f(glGetUniformLocation(cubeProgram_, "uColor"),0.2f,0.8f,0.3f);
+
+        glBindVertexArray(cubeVAO_);
+
+        for (const auto& cpos:cubeCenters_) {
+            AABB box;
+            box.mn= core::Vec3F{cpos.x - cubeHalfSize_, cpos.y - cubeHalfSize_, cpos.z - cubeHalfSize_};
+            box.mx= core::Vec3F{cpos.x + cubeHalfSize_, cpos.y + cubeHalfSize_, cpos.z + cubeHalfSize_};
+            if (!aabbInFrustum(fr,box)) {
+                continue;
+            }
+            float model[16];
+            identityMatrix(model);
+            model[12] = cpos.x;
+            model[13] = cpos.y;
+            model[14] = cpos.z;
+
+            glUniformMatrix4fv(glGetUniformLocation(cubeProgram_, "uModel"), 1, GL_FALSE, model);
+            glDrawElements(GL_TRIANGLES, cubeIndexCount_, GL_UNSIGNED_INT, 0);
+            drawnCubes_++;
+        }
+        glBindVertexArray(0);
+
         // Rendu du skybox
         glDepthFunc(GL_LEQUAL);
         glDepthMask(GL_FALSE);
@@ -850,6 +1005,25 @@ private:
         glUseProgram(0);
         glDepthMask(GL_TRUE);
         glDepthFunc(GL_LESS);
+        for (const auto& cpos : cubeCenters_) {
+            AABB box;
+            box.mn = core::Vec3F{cpos.x - cubeHalfSize_, cpos.y - cubeHalfSize_, cpos.z - cubeHalfSize_};
+            box.mx = core::Vec3F{cpos.x + cubeHalfSize_, cpos.y + cubeHalfSize_, cpos.z + cubeHalfSize_};
+
+            if (!aabbInFrustum(fr, box))
+                continue; // ✅ cube hors frustum => pas de draw call
+
+            float cubeModel[16];
+            identityMatrix(cubeModel);
+            cubeModel[12] = cpos.x; // translation en column-major
+            cubeModel[13] = cpos.y;
+            cubeModel[14] = cpos.z;
+            // glUseProgram(cubeProgram_);
+            // glUniformMatrix4fv(uModel/uView/uProj, ...)
+            // glBindVertexArray(cubeVAO_);
+            // glDrawArrays / glDrawElements
+        }
+
     }
 
     // Rendu avec effet de bloom
@@ -1385,6 +1559,13 @@ private:
         if (cubemapTex_) glDeleteTextures(1, &cubemapTex_);
         if (skyboxVBO_) glDeleteBuffers(1, &skyboxVBO_);
         if (skyboxVAO_) glDeleteVertexArrays(1, &skyboxVAO_);
+
+        if (cubeProgram_) glDeleteProgram(cubeProgram_);
+        if (cubeVBO_) glDeleteBuffers(1, &cubeVBO_);
+        if (cubeEBO_) glDeleteBuffers(1, &cubeEBO_);
+        if (cubeVAO_) glDeleteVertexArrays(1, &cubeVAO_);
+
+        cubeProgram_ = cubeVAO_ = cubeVBO_ = cubeEBO_ = 0;
 
         if (postProgram_) glDeleteProgram(postProgram_);
         if (bloomExtractProgram_) glDeleteProgram(bloomExtractProgram_);
