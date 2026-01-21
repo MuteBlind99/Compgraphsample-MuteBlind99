@@ -30,21 +30,22 @@ public:
         EFFECT_EMBOSS,
         EFFECT_SOBEL,
         EFFECT_GAUSSIAN_BLUR,
-        EFFECT_BLOOM,  // Effet avancé: bloom
+        EFFECT_BLOOM, // Effet avancé: bloom
         EFFECT_NIGHT_VISION,
         EFFECT_COUNT
     };
 
     void Begin() override {
         std::cout << "SkyboxRenderer::Begin() - Initialisation framebuffer" << std::endl;
-
+        std::cout << "GL_VERSION: " << glGetString(GL_VERSION) << "\n";
+        std::cout << "GLSL_VERSION: " << glGetString(GL_SHADING_LANGUAGE_VERSION) << "\n";
         // Utilisation de GetWindow() qui est déjà typé SDL_Window*
         SDL_Window *window = common::GetWindow();
         SetMouseLook(true);
         // Récupérer la taille réelle de la fenêtre
-        SDL_GetWindowSize(window, &screenWidth_,&screenHeight_);
-        width_=screenWidth_;
-        height_=screenHeight_;
+        SDL_GetWindowSize(window, &screenWidth_, &screenHeight_);
+        width_ = screenWidth_;
+        height_ = screenHeight_;
         initGL();
         createFramebuffer();
         createScreenQuad();
@@ -74,7 +75,11 @@ public:
         // Initialiser les matrices de convolution
         initConvolutionKernels();
         initCubeResources();
+        cubeDiffuseTex_ = loadTexture2D("data/textures/brickwall.jpg", true);
+        cubeNormalTex_  = loadTexture2D("data/textures/brickwall_normal.jpg", true);
         createCubeLine();
+        initCubeInstancing();
+
 
         // Initialiser ImGui si disponible
 #ifdef IMGUI_ENABLED
@@ -138,7 +143,6 @@ public:
     }
 
     void FixedUpdate() override {
-
     }
 
     void End() override {
@@ -150,7 +154,6 @@ public:
     }
 
     void Draw() override {
-
         // RENDER PASS 1: Scène principale dans le FBO
         renderSceneToFramebuffer();
         // Position de la lumière
@@ -234,7 +237,7 @@ private:
     bool keyWasDown_[512] = {false};
 
     // Matrices de convolution prédéfinies
-    std::vector<std::vector<float>> convolutionKernels_;
+    std::vector<std::vector<float> > convolutionKernels_;
 
     // Shaders
     GLuint modelProgram_ = 0;
@@ -273,11 +276,14 @@ private:
     GLuint cubeProgram_ = 0;
     GLuint cubeVAO_ = 0, cubeVBO_ = 0, cubeEBO_ = 0;
     GLsizei cubeIndexCount_ = 0;
-
+    GLuint cubeInstanceVBO_ = 0;
+    GLuint cubeDiffuseTex_ = 0;
+    GLuint cubeNormalTex_  = 0;
     std::vector<core::Vec3F> cubeCenters_;
-    float cubeHalfSize_ = 0.5f;   // AABB = center ± halfSize
+    float cubeHalfSize_ = 0.5f; // AABB = center ± halfSize
 
-    int drawnCubes_ = 0;          // debug (combien dessinés après culling)
+    std::vector<float> cubeInstanceMatrices_; // mat4 * N
+    int drawnCubes_ = 0; // debug (combien dessinés après culling)
 
     // Modèle
     std::unique_ptr<Model> model_;
@@ -285,54 +291,60 @@ private:
     struct Plane {
         core::Vec3F n;
         float d{}; // distance (ax+by+cz+d=0)
-        [[nodiscard]] float distance(const core::Vec3F& p)const {
-            return n.x*p.x + n.y*p.y +n.z*p.z+d;
+        [[nodiscard]] float distance(const core::Vec3F &p) const {
+            return n.x * p.x + n.y * p.y + n.z * p.z + d;
         }
     };
 
     struct Frustrum {
         Plane p[6]; // 0:L 1:R 2:B 3:T 4:N 5:F
     };
+
     struct AABB {
         core::Vec3F mn;
         core::Vec3F mx;
     };
-    static void normalizePlane(Plane& pl) {
-        float len =std::sqrt(pl.n.x* pl.n.x + pl.n.y* pl.n.y + pl.n.z* pl.n.z);
-        if (len> 0.0f) {
-            pl.n.x/=len; pl.n.y/=len; pl.n.z/=len;
-            pl.d /=len;
+
+    static void normalizePlane(Plane &pl) {
+        float len = std::sqrt(pl.n.x * pl.n.x + pl.n.y * pl.n.y + pl.n.z * pl.n.z);
+        if (len > 0.0f) {
+            pl.n.x /= len;
+            pl.n.y /= len;
+            pl.n.z /= len;
+            pl.d /= len;
         }
     }
-    static float mrc(const float* m, int row, int col) {return m[col*4+row];}
 
-    static Frustrum exractFrustrum(const float* proj, const float* view) {
+    static float mrc(const float *m, int row, int col) { return m[col * 4 + row]; }
+
+    static Frustrum exractFrustrum(const float *proj, const float *view) {
         float vp[16];
-        multiplyMat4(vp,proj, view);
+        multiplyMat4(vp, proj, view);
 
-        Frustrum f;
-        auto makePlane=[&](int signRow, int axisRow)->Plane {
+        Frustrum fr;
+        auto makePlane = [&](int signRow, int axisRow)-> Plane {
             Plane pl;
             pl.n.x = mrc(vp, 3, 0) + signRow * mrc(vp, axisRow, 0);
             pl.n.y = mrc(vp, 3, 1) + signRow * mrc(vp, axisRow, 1);
             pl.n.z = mrc(vp, 3, 2) + signRow * mrc(vp, axisRow, 2);
-            pl.d   = mrc(vp, 3, 3) + signRow * mrc(vp, axisRow, 3);
+            pl.d = mrc(vp, 3, 3) + signRow * mrc(vp, axisRow, 3);
             normalizePlane(pl);
             return pl;
         };
 
-        f.p[0] = makePlane(+1, 0); // Left  = row3 + row0
-        f.p[1] = makePlane(-1, 0); // Right = row3 - row0
-        f.p[2] = makePlane(+1, 1); // Bottom
-        f.p[3] = makePlane(-1, 1); // Top
-        f.p[4] = makePlane(+1, 2); // Near
-        f.p[5] = makePlane(-1, 2); // Far
-        return f;
+        fr.p[0] = makePlane(+1, 0); // Left  = row3 + row0
+        fr.p[1] = makePlane(-1, 0); // Right = row3 - row0
+        fr.p[2] = makePlane(+1, 1); // Bottom
+        fr.p[3] = makePlane(-1, 1); // Top
+        fr.p[4] = makePlane(+1, 2); // Near
+        fr.p[5] = makePlane(-1, 2); // Far
+        return fr;
     }
+
     // Test AABB vs frustum
-    static bool aabbInFrustum(const Frustrum& f, const AABB& b) {
-        for (int i=0;i <6; ++i) {
-            const Plane& p= f.p[i];
+    static bool aabbInFrustum(const Frustrum &f, const AABB &b) {
+        for (int i = 0; i < 6; ++i) {
+            const Plane &p = f.p[i];
 
             core::Vec3F v;
             v.x = (p.n.x >= 0.0f) ? b.mx.x : b.mn.x;
@@ -343,49 +355,157 @@ private:
         }
         return true;
     }
+
     void initCubeResources() {
         const std::string vs = R"(
-        #version 300 es
-        precision highp float;
-        layout(location=0) in vec3 aPos;
+    #version 330 core
 
-        uniform mat4 uModel;
-        uniform mat4 uView;
-        uniform mat4 uProj;
+layout(location=0) in vec3 aPos;
+layout(location=1) in vec3 aNormal;
+layout(location=2) in vec2 aUV;
+layout(location=3) in vec3 aTangent;
 
-        void main(){
-            gl_Position = uProj * uView * uModel * vec4(aPos, 1.0);
-        }
-    )";
+// instancing
+layout(location=4) in vec4 iM0;
+layout(location=5) in vec4 iM1;
+layout(location=6) in vec4 iM2;
+layout(location=7) in vec4 iM3;
+
+uniform mat4 uView;
+uniform mat4 uProj;
+
+out vec2 vUV;
+out vec3 vPosWS;
+out mat3 vTBN;
+
+void main()
+{
+    mat4 M = mat4(iM0, iM1, iM2, iM3);
+
+    vec3 N = normalize(mat3(M) * aNormal);
+    vec3 T = normalize(mat3(M) * aTangent);
+    T = normalize(T - dot(T, N) * N);
+    vec3 B = cross(N, T);
+
+    vTBN = mat3(T, B, N);
+    vUV = aUV;
+    vPosWS = vec3(M * vec4(aPos, 1.0));
+
+    gl_Position = uProj * uView * vec4(vPosWS, 1.0);
+}
+)";
 
         const std::string fs = R"(
-        #version 300 es
-        precision mediump float;
-        out vec4 FragColor;
-        uniform vec3 uColor;
-        void main(){
-            FragColor = vec4(uColor, 1.0);
-        }
-    )";
+#version 330 core
+in vec2 vUV;
+in vec3 vPosWS;
+in mat3 vTBN;
+
+out vec4 FragColor;
+
+uniform sampler2D uDiffuse;
+uniform sampler2D uNormalMap;
+
+uniform vec3 uLightPosWS;
+uniform vec3 uViewPosWS;
+
+void main(){
+    vec3 albedo = texture(uDiffuse, vUV).rgb;
+
+    // normal map (tangent space)
+    vec3 nTS = texture(uNormalMap, vUV).rgb;
+    nTS = normalize(nTS * 2.0 - 1.0); // [0,1] -> [-1,1]
+
+    // tangent -> world
+    vec3 N = normalize(vTBN * nTS);
+
+    vec3 L = normalize(uLightPosWS - vPosWS);
+    float diff = max(dot(N, L), 0.0);
+
+    vec3 V = normalize(uViewPosWS - vPosWS);
+    vec3 H = normalize(L + V);
+    float spec = pow(max(dot(N, H), 0.0), 32.0);
+
+    vec3 color = albedo * (0.15 + diff) + spec * 0.2;
+    FragColor = vec4(color, 1.0);
+}
+)";
 
         cubeProgram_ = createProgram(vs, fs);
 
         // Cube géométrie (positions only) + indices
-        const float h = 0.5f;
-        const float vertices[] = {
-            -h,-h,-h,  +h,-h,-h,  +h,+h,-h,  -h,+h,-h, // back
-            -h,-h,+h,  +h,-h,+h,  +h,+h,+h,  -h,+h,+h  // front
+        // const float h = 0.5f;
+        // const float vertices[] = {
+        //     -h, -h, -h, +h, -h, -h, +h, +h, -h, -h, +h, -h, // back
+        //     -h, -h, +h, +h, -h, +h, +h, +h, +h, -h, +h, +h // front
+        // };
+        //
+        // const unsigned int indices[] = {
+        //     0, 1, 2, 2, 3, 0, // back
+        //     4, 5, 6, 6, 7, 4, // front
+        //     0, 4, 7, 7, 3, 0, // left
+        //     1, 5, 6, 6, 2, 1, // right
+        //     3, 2, 6, 6, 7, 3, // top
+        //     0, 1, 5, 5, 4, 0 // bottom
+        // };
+        static constexpr float vertices[] = {
+            // +X
+            +0.5f, -0.5f, -0.5f, 1, 0, 0, 0, 0, 0, 0, -1,
+            +0.5f, -0.5f, +0.5f, 1, 0, 0, 1, 0, 0, 0, -1,
+            +0.5f, +0.5f, +0.5f, 1, 0, 0, 1, 1, 0, 0, -1,
+            +0.5f, +0.5f, -0.5f, 1, 0, 0, 0, 1, 0, 0, -1,
+
+            // -X
+            -0.5f, -0.5f, +0.5f, -1, 0, 0, 0, 0, 0, 0, 1,
+            -0.5f, -0.5f, -0.5f, -1, 0, 0, 1, 0, 0, 0, 1,
+            -0.5f, +0.5f, -0.5f, -1, 0, 0, 1, 1, 0, 0, 1,
+            -0.5f, +0.5f, +0.5f, -1, 0, 0, 0, 1, 0, 0, 1,
+
+            // +Y
+            -0.5f, +0.5f, -0.5f, 0, 1, 0, 0, 0, 1, 0, 0,
+            +0.5f, +0.5f, -0.5f, 0, 1, 0, 1, 0, 1, 0, 0,
+            +0.5f, +0.5f, +0.5f, 0, 1, 0, 1, 1, 1, 0, 0,
+            -0.5f, +0.5f, +0.5f, 0, 1, 0, 0, 1, 1, 0, 0,
+
+            // -Y
+            -0.5f, -0.5f, +0.5f, 0, -1, 0, 0, 0, 1, 0, 0,
+            +0.5f, -0.5f, +0.5f, 0, -1, 0, 1, 0, 1, 0, 0,
+            +0.5f, -0.5f, -0.5f, 0, -1, 0, 1, 1, 1, 0, 0,
+            -0.5f, -0.5f, -0.5f, 0, -1, 0, 0, 1, 1, 0, 0,
+
+            // +Z
+            -0.5f, -0.5f, +0.5f, 0, 0, 1, 0, 0, 1, 0, 0,
+            +0.5f, -0.5f, +0.5f, 0, 0, 1, 1, 0, 1, 0, 0,
+            +0.5f, +0.5f, +0.5f, 0, 0, 1, 1, 1, 1, 0, 0,
+            -0.5f, +0.5f, +0.5f, 0, 0, 1, 0, 1, 1, 0, 0,
+
+            // -Z
+            +0.5f, -0.5f, -0.5f, 0, 0, -1, 0, 0, -1, 0, 0,
+            -0.5f, -0.5f, -0.5f, 0, 0, -1, 1, 0, -1, 0, 0,
+            -0.5f, +0.5f, -0.5f, 0, 0, -1, 1, 1, -1, 0, 0,
+            +0.5f, +0.5f, -0.5f, 0, 0, -1, 0, 1, -1, 0, 0,
         };
 
-        const unsigned int indices[] = {
-            0,1,2, 2,3,0, // back
-            4,5,6, 6,7,4, // front
-            0,4,7, 7,3,0, // left
-            1,5,6, 6,2,1, // right
-            3,2,6, 6,7,3, // top
-            0,1,5, 5,4,0  // bottom
+        static constexpr unsigned int indices[] = {
+            // +X (flip)
+            0, 2, 1,   0, 3, 2,
+
+            // -X (flip)
+            4, 6, 5,   4, 7, 6,
+
+            // +Y (flip)
+            8, 10, 9,  8, 11, 10,
+
+            // -Y (flip)
+            12, 14, 13, 12, 15, 14,
+
+            // +Z (OK)
+            16, 17, 18, 18, 19, 16,
+
+            // -Z (OK)
+            20, 21, 22, 22, 23, 20
         };
-        cubeIndexCount_ = (GLsizei)(sizeof(indices)/sizeof(indices[0]));
+        cubeIndexCount_ = (GLsizei) (sizeof(indices) / sizeof(indices[0]));
 
         glGenVertexArrays(1, &cubeVAO_);
         glGenBuffers(1, &cubeVBO_);
@@ -399,11 +519,42 @@ private:
         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, cubeEBO_);
         glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
 
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3*sizeof(float), (void*)0);
+        // glEnableVertexAttribArray(0);
+        // glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *) 0);
+        //
+        // glBindVertexArray(0);
+        constexpr GLsizei stride = 11 * sizeof(float);
 
+        // pos
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void*)0);
+        // normal
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, (void*)(3*sizeof(float)));
+        // uv
+        glEnableVertexAttribArray(2);
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride, (void*)(6*sizeof(float)));
+        // tangent
+        glEnableVertexAttribArray(3);
+        glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, stride, (void*)(8*sizeof(float)));
+    }
+
+    void initCubeInstancing() {
+        glBindVertexArray(cubeVAO_);
+
+        glGenBuffers(1, &cubeInstanceVBO_);
+        glBindBuffer(GL_ARRAY_BUFFER, cubeInstanceVBO_);
+        glBufferData(GL_ARRAY_BUFFER, cubeCenters_.size() * 16 * sizeof(float), nullptr,GL_DYNAMIC_DRAW);
+        for (int i = 0; i < 4; ++i) {
+            glEnableVertexAttribArray(4 + i);
+            glVertexAttribPointer(4 + i, 4, GL_FLOAT, GL_FALSE,
+                                  16 * sizeof(float),
+                                  (void *) (i * 4 * sizeof(float)));
+            glVertexAttribDivisor(4 + i, 1);
+        }
         glBindVertexArray(0);
     }
+
     void createCubeLine() {
         cubeCenters_.clear();
 
@@ -415,6 +566,38 @@ private:
                 target_[2] - 15.0f
             });
         }
+    }
+    static GLuint loadTexture2D(const std::string& path, bool flipY)
+    {
+        stbi_set_flip_vertically_on_load(flipY);
+
+        int w, h, comp;
+        unsigned char* data = stbi_load(path.c_str(), &w, &h, &comp, 0);
+        if (!data) {
+            std::cerr << "[Texture] FAILED: " << path
+                      << " reason: " << stbi_failure_reason() << "\n";
+            return 0;
+        }
+
+        GLenum format = GL_RGB;
+        if (comp == 1) format = GL_RED;
+        else if (comp == 3) format = GL_RGB;
+        else if (comp == 4) format = GL_RGBA;
+
+        GLuint tex = 0;
+        glGenTextures(1, &tex);
+        glBindTexture(GL_TEXTURE_2D, tex);
+
+        glTexImage2D(GL_TEXTURE_2D, 0, format, w, h, 0, format, GL_UNSIGNED_BYTE, data);
+        glGenerateMipmap(GL_TEXTURE_2D);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+        stbi_image_free(data);
+        return tex;
     }
 
     static void identityMatrix(float *m) {
@@ -460,15 +643,15 @@ private:
         // Edge Detection
         convolutionKernels_[EFFECT_EDGE_DETECTION] = {
             -1, -1, -1,
-            -1,  8, -1,
+            -1, 8, -1,
             -1, -1, -1
         };
 
         // Flou
         convolutionKernels_[EFFECT_BLUR] = {
-            1/16.0f, 2/16.0f, 1/16.0f,
-            2/16.0f, 4/16.0f, 2/16.0f,
-            1/16.0f, 2/16.0f, 1/16.0f
+            1 / 16.0f, 2 / 16.0f, 1 / 16.0f,
+            2 / 16.0f, 4 / 16.0f, 2 / 16.0f,
+            1 / 16.0f, 2 / 16.0f, 1 / 16.0f
         };
 
         // Renforcement
@@ -494,11 +677,11 @@ private:
 
         // Gaussian Blur 5x5 (simplifié)
         convolutionKernels_[EFFECT_GAUSSIAN_BLUR] = {
-            1/256.0f, 4/256.0f,  6/256.0f,  4/256.0f, 1/256.0f,
-            4/256.0f, 16/256.0f, 24/256.0f, 16/256.0f, 4/256.0f,
-            6/256.0f, 24/256.0f, 36/256.0f, 24/256.0f, 6/256.0f,
-            4/256.0f, 16/256.0f, 24/256.0f, 16/256.0f, 4/256.0f,
-            1/256.0f, 4/256.0f,  6/256.0f,  4/256.0f, 1/256.0f
+            1 / 256.0f, 4 / 256.0f, 6 / 256.0f, 4 / 256.0f, 1 / 256.0f,
+            4 / 256.0f, 16 / 256.0f, 24 / 256.0f, 16 / 256.0f, 4 / 256.0f,
+            6 / 256.0f, 24 / 256.0f, 36 / 256.0f, 24 / 256.0f, 6 / 256.0f,
+            4 / 256.0f, 16 / 256.0f, 24 / 256.0f, 16 / 256.0f, 4 / 256.0f,
+            1 / 256.0f, 4 / 256.0f, 6 / 256.0f, 4 / 256.0f, 1 / 256.0f
         };
     }
 
@@ -565,7 +748,7 @@ private:
             glBindTexture(GL_TEXTURE_2D, bloomTex_[i]);
 
             // Textures plus petites pour le bloom (downsampling)
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width_/2, height_/2, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width_ / 2, height_ / 2, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -585,12 +768,12 @@ private:
         const float quad[] = {
             // x, y, u, v
             -1, -1, 0, 0,
-             1, -1, 1, 0,
-             1,  1, 1, 1,
+            1, -1, 1, 0,
+            1, 1, 1, 1,
 
             -1, -1, 0, 0,
-             1,  1, 1, 1,
-            -1,  1, 0, 1
+            1, 1, 1, 1,
+            -1, 1, 0, 1
         };
 
         glGenVertexArrays(1, &quadVAO_);
@@ -600,17 +783,18 @@ private:
         glBufferData(GL_ARRAY_BUFFER, sizeof(quad), &quad, GL_STATIC_DRAW);
 
         glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+        glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *) 0);
 
         glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void *) (2 * sizeof(float)));
 
         glBindVertexArray(0);
     }
+
     // Initialisation des shaders de post-processing
     void initPostProcessingShaders() {
-        const char* postVertexShader = R"(
-            #version 300 es
+        const char *postVertexShader = R"(
+            #version 330 core
             precision mediump float;
 
             layout(location = 0) in vec2 aPos;
@@ -624,8 +808,8 @@ private:
             }
         )";
 
-        const char* postFragmentShader = R"(
-    #version 300 es
+        const char *postFragmentShader = R"(
+    #version 330 core
     precision mediump float;
 
     in vec2 vUV;
@@ -775,9 +959,9 @@ private:
 
     // Initialisation des shaders pour le bloom
     void initBloomShaders() {
-    // Shader d'extraction des zones lumineuses
-    const char* bloomExtractFS = R"(
-        #version 300 es
+        // Shader d'extraction des zones lumineuses
+        const char *bloomExtractFS = R"(
+        #version 330 core
         precision mediump float;
 
         in vec2 vUV;
@@ -802,8 +986,8 @@ private:
         }
     )";
 
-    const char* bloomVertexShader = R"(
-        #version 300 es
+        const char *bloomVertexShader = R"(
+        #version 330 core
         precision mediump float;
 
         layout(location = 0) in vec2 aPos;
@@ -817,9 +1001,9 @@ private:
         }
     )";
 
-    // Shader de flou gaussien - CORRIGÉ
-    const char* bloomBlurFS = R"(
-        #version 300 es
+        // Shader de flou gaussien - CORRIGÉ
+        const char *bloomBlurFS = R"(
+        #version 330 core
         precision mediump float;
 
         in vec2 vUV;
@@ -854,9 +1038,9 @@ private:
         }
     )";
 
-    // Shader de combinaison bloom - SIMPLIFIÉ POUR ÉVITER LES ERREURS
-    const char* bloomCombineFS = R"(
-        #version 300 es
+        // Shader de combinaison bloom - SIMPLIFIÉ POUR ÉVITER LES ERREURS
+        const char *bloomCombineFS = R"(
+        #version 330 core
         precision mediump float;
 
         in vec2 vUV;
@@ -877,10 +1061,10 @@ private:
         }
     )";
 
-    bloomExtractProgram_ = createProgram(bloomVertexShader, bloomExtractFS);
-    bloomBlurProgram_ = createProgram(bloomVertexShader, bloomBlurFS);
-    bloomCombineProgram_ = createProgram(bloomVertexShader, bloomCombineFS);
-}
+        bloomExtractProgram_ = createProgram(bloomVertexShader, bloomExtractFS);
+        bloomBlurProgram_ = createProgram(bloomVertexShader, bloomBlurFS);
+        bloomCombineProgram_ = createProgram(bloomVertexShader, bloomCombineFS);
+    }
 
     // Rendu de la scène dans le framebuffer
     void renderSceneToFramebuffer() {
@@ -893,8 +1077,10 @@ private:
 
         // Calcul des matrices
         float view[16], proj[16], modelMat[16];
-        Frustrum fr = exractFrustrum(proj, view);
-        drawnCubes_=0;
+
+        drawnCubes_ = 0;
+        cubeInstanceMatrices_.clear();
+
 
         float yawRad = yaw_ * 3.1415926535f / 180.0f;
         float pitchRad = pitch_ * 3.1415926535f / 180.0f;
@@ -906,13 +1092,31 @@ private:
 
         // Matrice de vue
         lookAtMatrix(view,
-                    camX, camY, camZ,
-                    target_[0], target_[1], target_[2],
-                    0.0f, 1.0f, 0.0f);
+                     camX, camY, camZ,
+                     target_[0], target_[1], target_[2],
+                     0.0f, 1.0f, 0.0f);
 
         // Matrice de projection
-        perspectiveMatrix(proj, 60.0f, (float)width_ / (float)height_, 0.1f, 500.0f);
+        perspectiveMatrix(proj, 60.0f, (float) width_ / (float) height_, 0.1f, 500.0f);
+        Frustrum fr = exractFrustrum(proj, view);
 
+        for (const auto &cpos: cubeCenters_) {
+            AABB box;
+            box.mn = {cpos.x - cubeHalfSize_, cpos.y - cubeHalfSize_, cpos.z - cubeHalfSize_};
+            box.mx = {cpos.x + cubeHalfSize_, cpos.y + cubeHalfSize_, cpos.z + cubeHalfSize_};
+
+            if (!aabbInFrustum(fr, box))
+                continue;
+
+            float model[16];
+            identityMatrix(model);
+            model[12] = cpos.x;
+            model[13] = cpos.y;
+            model[14] = cpos.z;
+
+            cubeInstanceMatrices_.insert(
+                cubeInstanceMatrices_.end(), model, model + 16);
+        }
         // Rotation du modèle
         identityMatrix(modelMat);
         float dx = camX - target_[0];
@@ -933,16 +1137,20 @@ private:
 
         GLint loc;
         loc = glGetUniformLocation(modelProgram_, "uLightColor");
-        if (loc >= 0) glUniform3f(loc, 1.0f, 1.0f, 1.0f);
+        if (loc >= 0)
+            glUniform3f(loc, 1.0f, 1.0f, 1.0f);
 
         loc = glGetUniformLocation(modelProgram_, "uMaterialShininess");
-        if (loc >= 0) glUniform1f(loc, 32.0f);
+        if (loc >= 0)
+            glUniform1f(loc, 32.0f);
 
         loc = glGetUniformLocation(modelProgram_, "uViewPos");
-        if (loc >= 0) glUniform3f(loc, camX, camY, camZ);
+        if (loc >= 0)
+            glUniform3f(loc, camX, camY, camZ);
 
         loc = glGetUniformLocation(modelProgram_, "uLightPos");
-        if (loc >= 0) glUniform3f(loc, target_[0] + 3.0f, target_[1] + 5.0f, target_[2] + 3.0f);
+        if (loc >= 0)
+            glUniform3f(loc, target_[0] + 3.0f, target_[1] + 5.0f, target_[2] + 3.0f);
 
         glUniformMatrix4fv(glGetUniformLocation(modelProgram_, "uModel"), 1, GL_FALSE, modelMat);
         glUniformMatrix4fv(glGetUniformLocation(modelProgram_, "uView"), 1, GL_FALSE, view);
@@ -957,30 +1165,65 @@ private:
 
         //Cube
         glUseProgram(cubeProgram_);
-        glUniformMatrix4fv(glGetUniformLocation(cubeProgram_,"uView"),1,GL_FALSE,view);
-        glUniformMatrix4fv(glGetUniformLocation(cubeProgram_,"uProj"),1,GL_FALSE,proj);
-        glUniform3f(glGetUniformLocation(cubeProgram_, "uColor"),0.2f,0.8f,0.3f);
+        glUniformMatrix4fv(glGetUniformLocation(cubeProgram_, "uView"), 1, GL_FALSE, view);
+        glUniformMatrix4fv(glGetUniformLocation(cubeProgram_, "uProj"), 1, GL_FALSE, proj);
+
+        // caméra + lumière (tu as déjà camX/camY/camZ)
+        glUniform3f(glGetUniformLocation(cubeProgram_, "uViewPosWS"), camX, camY, camZ);
+        glUniform3f(glGetUniformLocation(cubeProgram_, "uLightPosWS"),
+                    target_[0] + 3.0f, target_[1] + 5.0f, target_[2] + 3.0f);
+
+        // diffuse = unit 0
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, cubeDiffuseTex_);
+        glUniform1i(glGetUniformLocation(cubeProgram_, "uDiffuse"), 0);
+
+        // normal = unit 1
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, cubeNormalTex_);
+        glUniform1i(glGetUniformLocation(cubeProgram_, "uNormalMap"), 1);
+
+        glBindBuffer(GL_ARRAY_BUFFER, cubeInstanceVBO_);
+        glBufferSubData(GL_ARRAY_BUFFER, 0,
+                        cubeInstanceMatrices_.size() * sizeof(float),
+                        cubeInstanceMatrices_.data());
 
         glBindVertexArray(cubeVAO_);
-
-        for (const auto& cpos:cubeCenters_) {
-            AABB box;
-            box.mn= core::Vec3F{cpos.x - cubeHalfSize_, cpos.y - cubeHalfSize_, cpos.z - cubeHalfSize_};
-            box.mx= core::Vec3F{cpos.x + cubeHalfSize_, cpos.y + cubeHalfSize_, cpos.z + cubeHalfSize_};
-            if (!aabbInFrustum(fr,box)) {
-                continue;
-            }
-            float model[16];
-            identityMatrix(model);
-            model[12] = cpos.x;
-            model[13] = cpos.y;
-            model[14] = cpos.z;
-
-            glUniformMatrix4fv(glGetUniformLocation(cubeProgram_, "uModel"), 1, GL_FALSE, model);
-            glDrawElements(GL_TRIANGLES, cubeIndexCount_, GL_UNSIGNED_INT, 0);
-            drawnCubes_++;
-        }
+        glDrawElementsInstanced(GL_TRIANGLES, cubeIndexCount_, GL_UNSIGNED_INT,
+                                0, (GLsizei) (cubeInstanceMatrices_.size() / 16));
+        drawnCubes_=(int)(cubeInstanceMatrices_.size() / 16);
         glBindVertexArray(0);
+
+
+        // for (const auto &cpos: cubeCenters_) {
+        //     AABB box;
+        //     box.mn = core::Vec3F{cpos.x - cubeHalfSize_, cpos.y - cubeHalfSize_, cpos.z - cubeHalfSize_};
+        //     box.mx = core::Vec3F{cpos.x + cubeHalfSize_, cpos.y + cubeHalfSize_, cpos.z + cubeHalfSize_};
+        //     if (!aabbInFrustum(fr, box)) {
+        //         continue;
+        //     }
+        //     float model[16];
+        //     identityMatrix(model);
+        //     model[12] = cpos.x;
+        //     model[13] = cpos.y;
+        //     model[14] = cpos.z;
+        //
+        //     glUniformMatrix4fv(glGetUniformLocation(cubeProgram_, "uModel"), 1, GL_FALSE, model);
+        //     // glDrawElements(GL_TRIANGLES, cubeIndexCount_, GL_UNSIGNED_INT, 0);
+        //     glBindBuffer(GL_ARRAY_BUFFER, cubeInstanceVBO_);
+        //     glBufferSubData(GL_ARRAY_BUFFER, 0,
+        //                     cubeInstanceMatrices_.size() * sizeof(float),
+        //                     cubeInstanceMatrices_.data());
+        //
+        //     glBindVertexArray(cubeVAO_);
+        //     glDrawElementsInstanced(GL_TRIANGLES,
+        //                             cubeIndexCount_,
+        //                             GL_UNSIGNED_INT,
+        //                             0,
+        //                             cubeInstanceMatrices_.size() / 16);
+        //     drawnCubes_++;
+        // }
+        // glBindVertexArray(0);
 
         // Rendu du skybox
         glDepthFunc(GL_LEQUAL);
@@ -1005,7 +1248,7 @@ private:
         glUseProgram(0);
         glDepthMask(GL_TRUE);
         glDepthFunc(GL_LESS);
-        for (const auto& cpos : cubeCenters_) {
+        for (const auto &cpos: cubeCenters_) {
             AABB box;
             box.mn = core::Vec3F{cpos.x - cubeHalfSize_, cpos.y - cubeHalfSize_, cpos.z - cubeHalfSize_};
             box.mx = core::Vec3F{cpos.x + cubeHalfSize_, cpos.y + cubeHalfSize_, cpos.z + cubeHalfSize_};
@@ -1023,14 +1266,13 @@ private:
             // glBindVertexArray(cubeVAO_);
             // glDrawArrays / glDrawElements
         }
-
     }
 
     // Rendu avec effet de bloom
     void renderWithBloom() {
         // Étape 1: Extraire les zones lumineuses
         glBindFramebuffer(GL_FRAMEBUFFER, bloomFBO_[0]);
-        glViewport(0, 0, width_/2, height_/2);
+        glViewport(0, 0, width_ / 2, height_ / 2);
         glClear(GL_COLOR_BUFFER_BIT);
 
         glUseProgram(bloomExtractProgram_);
@@ -1048,7 +1290,7 @@ private:
 
         glUseProgram(bloomBlurProgram_);
         glUniform2f(glGetUniformLocation(bloomBlurProgram_, "uTexelSize"),
-                   1.0f / (width_/2), 1.0f / (height_/2));
+                    1.0f / (width_ / 2), 1.0f / (height_ / 2));
 
         for (int i = 0; i < blurIterations_ * 2; i++) {
             glBindFramebuffer(GL_FRAMEBUFFER, bloomFBO_[horizontal ? 1 : 0]);
@@ -1103,7 +1345,7 @@ private:
         // Passer les uniformes
         glUniform1i(glGetUniformLocation(postProgram_, "uEffect"), currentEffect_);
         glUniform2f(glGetUniformLocation(postProgram_, "uTexelSize"),
-                   1.0f / width_, 1.0f / height_);
+                    1.0f / width_, 1.0f / height_);
         glUniform1f(glGetUniformLocation(postProgram_, "uTime"), time_);
         glUniform1f(glGetUniformLocation(postProgram_, "uBloomThreshold"), bloomThreshold_);
         glUniform1f(glGetUniformLocation(postProgram_, "uBloomIntensity"), bloomIntensity_);
@@ -1111,9 +1353,9 @@ private:
         // Passer le kernel de convolution si nécessaire
         if (currentEffect_ == EFFECT_GAUSSIAN_BLUR &&
             currentEffect_ < convolutionKernels_.size()) {
-            const auto& kernel = convolutionKernels_[currentEffect_];
+            const auto &kernel = convolutionKernels_[currentEffect_];
             glUniform1fv(glGetUniformLocation(postProgram_, "uKernel"),
-                        kernel.size(), kernel.data());
+                         kernel.size(), kernel.data());
         }
 
         glActiveTexture(GL_TEXTURE0);
@@ -1129,9 +1371,9 @@ private:
 
 
     static GLuint createModelShaderProgram() {
-    // Vertex Shader
-    const char *vertexSource = R"(
-         #version 300 es
+        // Vertex Shader
+        const char *vertexSource = R"(
+         #version 330 core
     precision mediump float;
 
     layout(location = 0) in vec3 aPosition;
@@ -1160,9 +1402,9 @@ private:
     }
 )";
 
-     // UTILISEZ CE SHADER POUR DEBUG
-    const char *fragmentSource = R"(
-        #version 300 es
+        // UTILISEZ CE SHADER POUR DEBUG
+        const char *fragmentSource = R"(
+        #version 330 core
         precision mediump float;
 
         in vec3 FragPos;
@@ -1249,28 +1491,29 @@ private:
         }
     )";
 
-    GLuint vertexShader = compileShader(GL_VERTEX_SHADER, vertexSource);
-    GLuint fragmentShader = compileShader(GL_FRAGMENT_SHADER, fragmentSource);
+        GLuint vertexShader = compileShader(GL_VERTEX_SHADER, vertexSource);
+        GLuint fragmentShader = compileShader(GL_FRAGMENT_SHADER, fragmentSource);
 
-    GLuint program = glCreateProgram();
-    glAttachShader(program, vertexShader);
-    glAttachShader(program, fragmentShader);
-    glLinkProgram(program);
+        GLuint program = glCreateProgram();
+        glAttachShader(program, vertexShader);
+        glAttachShader(program, fragmentShader);
+        glLinkProgram(program);
 
-    GLint success;
-    glGetProgramiv(program, GL_LINK_STATUS, &success);
-    if (!success) {
-        char infoLog[512];
-        glGetProgramInfoLog(program, 512, nullptr, infoLog);
-        throw std::runtime_error(std::string("Erreur linkage shader: ") + infoLog);
+        GLint success;
+        glGetProgramiv(program, GL_LINK_STATUS, &success);
+        if (!success) {
+            char infoLog[512];
+            glGetProgramInfoLog(program, 512, nullptr, infoLog);
+            throw std::runtime_error(std::string("Erreur linkage shader: ") + infoLog);
+        }
+
+        glDeleteShader(vertexShader);
+        glDeleteShader(fragmentShader);
+
+        std::cout << "✓ Shader debug créé" << std::endl;
+        return program;
     }
 
-    glDeleteShader(vertexShader);
-    glDeleteShader(fragmentShader);
-
-    std::cout << "✓ Shader debug créé" << std::endl;
-    return program;
-}
     void initGL() {
         // Créer les shaders
         modelProgram_ = createModelShaderProgram();
@@ -1299,9 +1542,11 @@ private:
         glEnable(GL_DEPTH_TEST);
         glDepthFunc(GL_LESS);
 
+        glFrontFace(GL_CCW);
+        // Cacher les faces arrière
+        glCullFace(GL_BACK);
         glEnable(GL_CULL_FACE);
-        glCullFace(GL_BACK); // Cacher les faces arrière
-        glFrontFace(GL_CCW); // Sens antihoraire = face avant
+        // Sens antihoraire = face avant
 
         // // Activer le blending pour la transparence
         // glEnable(GL_BLEND);
@@ -1332,7 +1577,7 @@ private:
 
         // 2) shaders skybox (inline, comme ton demo)
         const std::string vs = R"(
-            #version 300 es
+            #version 330 core
             precision highp float;
             layout (location = 0) in vec3 aPos;
             out vec3 TexCoords;
@@ -1353,7 +1598,7 @@ private:
         )";
 
         const std::string fs = R"(
-            #version 300 es
+            #version 330 core
             precision mediump float;
             precision mediump samplerCube;
             in vec3 TexCoords;
@@ -1555,36 +1800,53 @@ private:
     // Nettoyage
     void cleanup() {
         // Nettoyer les ressources OpenGL
-        if (skyboxProgram_) glDeleteProgram(skyboxProgram_);
+        if (skyboxProgram_)
+            glDeleteProgram(skyboxProgram_);
         if (cubemapTex_) glDeleteTextures(1, &cubemapTex_);
-        if (skyboxVBO_) glDeleteBuffers(1, &skyboxVBO_);
-        if (skyboxVAO_) glDeleteVertexArrays(1, &skyboxVAO_);
+        if (skyboxVBO_)
+            glDeleteBuffers(1, &skyboxVBO_);
+        if (skyboxVAO_)
+            glDeleteVertexArrays(1, &skyboxVAO_);
 
-        if (cubeProgram_) glDeleteProgram(cubeProgram_);
-        if (cubeVBO_) glDeleteBuffers(1, &cubeVBO_);
-        if (cubeEBO_) glDeleteBuffers(1, &cubeEBO_);
-        if (cubeVAO_) glDeleteVertexArrays(1, &cubeVAO_);
+        if (cubeProgram_)
+            glDeleteProgram(cubeProgram_);
+        if (cubeVBO_)
+            glDeleteBuffers(1, &cubeVBO_);
+        if (cubeEBO_)
+            glDeleteBuffers(1, &cubeEBO_);
+        if (cubeVAO_)
+            glDeleteVertexArrays(1, &cubeVAO_);
 
         cubeProgram_ = cubeVAO_ = cubeVBO_ = cubeEBO_ = 0;
 
-        if (postProgram_) glDeleteProgram(postProgram_);
-        if (bloomExtractProgram_) glDeleteProgram(bloomExtractProgram_);
-        if (bloomBlurProgram_) glDeleteProgram(bloomBlurProgram_);
-        if (bloomCombineProgram_) glDeleteProgram(bloomCombineProgram_);
+        if (postProgram_)
+            glDeleteProgram(postProgram_);
+        if (bloomExtractProgram_)
+            glDeleteProgram(bloomExtractProgram_);
+        if (bloomBlurProgram_)
+            glDeleteProgram(bloomBlurProgram_);
+        if (bloomCombineProgram_)
+            glDeleteProgram(bloomCombineProgram_);
 
-        if (fbo_) glDeleteFramebuffers(1, &fbo_);
+        if (fbo_)
+            glDeleteFramebuffers(1, &fbo_);
         if (colorTex_) glDeleteTextures(1, &colorTex_);
-        if (rboDepthStencil_) glDeleteRenderbuffers(1, &rboDepthStencil_);
+        if (rboDepthStencil_)
+            glDeleteRenderbuffers(1, &rboDepthStencil_);
 
         for (int i = 0; i < 2; i++) {
-            if (pingpongFBO_[i]) glDeleteFramebuffers(1, &pingpongFBO_[i]);
+            if (pingpongFBO_[i])
+                glDeleteFramebuffers(1, &pingpongFBO_[i]);
             if (pingpongTex_[i]) glDeleteTextures(1, &pingpongTex_[i]);
-            if (bloomFBO_[i]) glDeleteFramebuffers(1, &bloomFBO_[i]);
+            if (bloomFBO_[i])
+                glDeleteFramebuffers(1, &bloomFBO_[i]);
             if (bloomTex_[i]) glDeleteTextures(1, &bloomTex_[i]);
         }
 
-        if (quadVAO_) glDeleteVertexArrays(1, &quadVAO_);
-        if (quadVBO_) glDeleteBuffers(1, &quadVBO_);
+        if (quadVAO_)
+            glDeleteVertexArrays(1, &quadVAO_);
+        if (quadVBO_)
+            glDeleteBuffers(1, &quadVBO_);
 
         skyboxProgram_ = 0;
         cubemapTex_ = 0;

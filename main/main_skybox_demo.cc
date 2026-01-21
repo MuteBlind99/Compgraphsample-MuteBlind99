@@ -47,6 +47,9 @@ public:
         // optionnel: angle de départ pour bien voir
         yaw_=90.0f;
         pitch_ = 10.0f;
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_BACK);
+        glFrontFace(GL_CCW);
         createSkyboxRessources();
     }
 
