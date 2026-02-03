@@ -433,21 +433,6 @@ void main(){
 
         cubeProgram_ = createProgram(vs, fs);
 
-        // Cube géométrie (positions only) + indices
-        // const float h = 0.5f;
-        // const float vertices[] = {
-        //     -h, -h, -h, +h, -h, -h, +h, +h, -h, -h, +h, -h, // back
-        //     -h, -h, +h, +h, -h, +h, +h, +h, +h, -h, +h, +h // front
-        // };
-        //
-        // const unsigned int indices[] = {
-        //     0, 1, 2, 2, 3, 0, // back
-        //     4, 5, 6, 6, 7, 4, // front
-        //     0, 4, 7, 7, 3, 0, // left
-        //     1, 5, 6, 6, 2, 1, // right
-        //     3, 2, 6, 6, 7, 3, // top
-        //     0, 1, 5, 5, 4, 0 // bottom
-        // };
         static constexpr float vertices[] = {
             // +X
             +0.5f, -0.5f, -0.5f, 1, 0, 0, 0, 0, 0, 0, -1,
@@ -1195,35 +1180,7 @@ void main(){
         glBindVertexArray(0);
 
 
-        // for (const auto &cpos: cubeCenters_) {
-        //     AABB box;
-        //     box.mn = core::Vec3F{cpos.x - cubeHalfSize_, cpos.y - cubeHalfSize_, cpos.z - cubeHalfSize_};
-        //     box.mx = core::Vec3F{cpos.x + cubeHalfSize_, cpos.y + cubeHalfSize_, cpos.z + cubeHalfSize_};
-        //     if (!aabbInFrustum(fr, box)) {
-        //         continue;
-        //     }
-        //     float model[16];
-        //     identityMatrix(model);
-        //     model[12] = cpos.x;
-        //     model[13] = cpos.y;
-        //     model[14] = cpos.z;
-        //
-        //     glUniformMatrix4fv(glGetUniformLocation(cubeProgram_, "uModel"), 1, GL_FALSE, model);
-        //     // glDrawElements(GL_TRIANGLES, cubeIndexCount_, GL_UNSIGNED_INT, 0);
-        //     glBindBuffer(GL_ARRAY_BUFFER, cubeInstanceVBO_);
-        //     glBufferSubData(GL_ARRAY_BUFFER, 0,
-        //                     cubeInstanceMatrices_.size() * sizeof(float),
-        //                     cubeInstanceMatrices_.data());
-        //
-        //     glBindVertexArray(cubeVAO_);
-        //     glDrawElementsInstanced(GL_TRIANGLES,
-        //                             cubeIndexCount_,
-        //                             GL_UNSIGNED_INT,
-        //                             0,
-        //                             cubeInstanceMatrices_.size() / 16);
-        //     drawnCubes_++;
-        // }
-        // glBindVertexArray(0);
+
 
         // Rendu du skybox
         glDepthFunc(GL_LEQUAL);

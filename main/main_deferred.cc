@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 #include <cmath>
+#include <corecrt_math_defines.h>
 #include <imgui.h>
 #include <SDL3/SDL.h>
 
@@ -76,7 +77,10 @@ public:
         initConvolutionKernels();
         initCubeResources();
         cubeDiffuseTex_ = loadTexture2D("data/textures/brickwall.jpg", true);
-        cubeNormalTex_  = loadTexture2D("data/textures/brickwall_normal.jpg", true);
+        cubeNormalTex_ = loadTexture2D("data/textures/brickwall_normal.jpg", true);
+
+        createGBuffer(width_, height_);
+
         createCubeLine();
         initCubeInstancing();
 
@@ -147,6 +151,13 @@ public:
 
     void End() override {
         SetMouseLook(false);
+
+        if (gBuffer_) glDeleteFramebuffers(1, &gBuffer_);
+        if (gPosition_) glDeleteTextures(1, &gPosition_);
+        if (gNormal_) glDeleteTextures(1, &gNormal_);
+        if (gAlbedoSpec_) glDeleteTextures(1, &gAlbedoSpec_);
+        if (rboDepth_) glDeleteRenderbuffers(1, &rboDepth_);
+
         cleanup();
     }
 
@@ -161,13 +172,13 @@ public:
         float lightY = target_[1] + 5.0f;
         float lightZ = target_[2] + 3.0f;
 
-        std::cout << "[DEBUG] Light position: " << lightX << ", " << lightY << ", " << lightZ << std::endl;
-        // RENDER PASS 2: Post-processing (multi-pass si nécessaire)
-        if (useBloom_ && currentEffect_ != EFFECT_NONE) {
-            renderWithBloom();
-        } else {
-            renderPostProcessing();
-        }
+        // std::cout << "[DEBUG] Light position: " << lightX << ", " << lightY << ", " << lightZ << std::endl;
+        // // RENDER PASS 2: Post-processing (multi-pass si nécessaire)
+        // if (useBloom_ && currentEffect_ != EFFECT_NONE) {
+        //     renderWithBloom();
+        // } else {
+        //     renderPostProcessing();
+        // }
 
         // RENDER PASS 3: Interface utilisateur
 #ifdef IMGUI_ENABLED
@@ -278,7 +289,10 @@ private:
     GLsizei cubeIndexCount_ = 0;
     GLuint cubeInstanceVBO_ = 0;
     GLuint cubeDiffuseTex_ = 0;
-    GLuint cubeNormalTex_  = 0;
+    GLuint cubeNormalTex_ = 0;
+    GLuint deferredProgram_ = 0;
+    GLuint gBuffer_ = 0, gPosition_ = 0, gNormal_ = 0, gAlbedoSpec_ = 0;
+    GLuint rboDepth_ = 0;
     std::vector<core::Vec3F> cubeCenters_;
     float cubeHalfSize_ = 0.5f; // AABB = center ± halfSize
 
@@ -377,62 +391,186 @@ uniform mat4 uProj;
 out vec2 vUV;
 out vec3 vPosWS;
 out mat3 vTBN;
+out vec3 Normal;
 
 void main()
 {
     mat4 M = mat4(iM0, iM1, iM2, iM3);
-
-    vec3 N = normalize(mat3(M) * aNormal);
-    vec3 T = normalize(mat3(M) * aTangent);
+    mat3 normalMatrices= mat3(transpose(inverse(M)));
+    Normal=normalize(normalMatrices * aNormal);
+    vec3 N = normalize(normalMatrices * aNormal);
+    vec3 T = normalize(normalMatrices * aTangent);
     T = normalize(T - dot(T, N) * N);
     vec3 B = cross(N, T);
 
     vTBN = mat3(T, B, N);
     vUV = aUV;
-    vPosWS = vec3(M * vec4(aPos, 1.0));
+    vec4 worldPos = M * vec4(aPos, 1.0);
+    vPosWS = worldPos.xyz;
 
-    gl_Position = uProj * uView * vec4(vPosWS, 1.0);
+    gl_Position = uProj * uView * worldPos;
 }
 )";
 
         const std::string fs = R"(
 #version 330 core
+layout(location=0) out vec4 gPosition;
+layout(location=1) out vec4 gNormal;
+layout(location=2) out vec4 gAlbedoSpec;
+
+
 in vec2 vUV;
 in vec3 vPosWS;
 in mat3 vTBN;
-
-out vec4 FragColor;
+in vec3 Normal;
 
 uniform sampler2D uDiffuse;
 uniform sampler2D uNormalMap;
-
-uniform vec3 uLightPosWS;
-uniform vec3 uViewPosWS;
+uniform bool useNormal;
 
 void main(){
-    vec3 albedo = texture(uDiffuse, vUV).rgb;
 
-    // normal map (tangent space)
-    vec3 nTS = texture(uNormalMap, vUV).rgb;
-    nTS = normalize(nTS * 2.0 - 1.0); // [0,1] -> [-1,1]
+    gPosition=vec4(vPosWS, 1.0);
 
     // tangent -> world
-    vec3 N = normalize(vTBN * nTS);
+    vec3 N = normalize(Normal);
 
-    vec3 L = normalize(uLightPosWS - vPosWS);
-    float diff = max(dot(N, L), 0.0);
+    if(useNormal){
+        // normal map (tangent space)
+        vec3 nTS = texture(uNormalMap, vUV).rgb;
+        nTS = normalize(nTS * 2.0 - 1.0); // [0,1] -> [-1,1]
+        N=normalize(vTBN * nTS);
+    }
+    gNormal=vec4(N*0.5+0.5, 1.0);
 
-    vec3 V = normalize(uViewPosWS - vPosWS);
-    vec3 H = normalize(L + V);
-    float spec = pow(max(dot(N, H), 0.0), 32.0);
+    vec4 diffuseTex = texture(uDiffuse, vUV);
+    vec3 albedo = diffuseTex.rgb;
+    float specular = 0.6; // Force spéculaire constante pour test
 
-    vec3 color = albedo * (0.15 + diff) + spec * 0.2;
-    FragColor = vec4(color, 1.0);
+    if(length(albedo) < 0.01) {
+        albedo = vec3(0.8, 0.6, 0.4); // Couleur de brique par défaut
+    }
+
+    gAlbedoSpec = vec4(albedo, specular);
 }
 )";
+        const std::string drv = R"(#version 330 core
+        layout(location=0) in vec2 aPos;
+        layout(location=1) in vec2 aTexCoord;
+        out vec2 TexCoord;
+void main(){
+    TexCoord= aTexCoord;
+    gl_Position= vec4(aPos.x, aPos.y, 0.0, 1.0);
+}
+
+)";
+        const std::string drf = R"(#version 330 core
+layout(location=0) out vec4 FragColor;
+
+in vec2 TexCoord;
+
+uniform sampler2D gPosition;
+uniform sampler2D gNormal;
+uniform sampler2D gAlbedoSpec;
+
+uniform vec3 viewPos;
+uniform float specularPow;
+
+struct PointLight{
+    vec3 position;
+    vec3 color;
+    float constant;
+    float linear;
+    float quadratic;
+};
+uniform int pointLightCount;
+uniform PointLight pointLights[1];
+
+uniform int debugMode;
+
+void main(){
+    // Mode debug: 0=normal, 1=positions, 2=normales, 3=albedo, 4=UV
+    if(debugMode == 1) {
+        // Afficher les positions (normalisées pour la visualisation)
+        vec3 pos = texture(gPosition, TexCoord).rgb;
+        FragColor = vec4(normalize(pos) * 0.5 + 0.5, 1.0);
+        return;
+    }
+    else if(debugMode == 2) {
+        // Afficher les normales (déjà en [0,1])
+        FragColor = texture(gNormal, TexCoord);
+        return;
+    }
+    else if(debugMode == 3) {
+        // Afficher l'albedo (couleur de la texture)
+        FragColor = texture(gAlbedoSpec, TexCoord);
+        return;
+    }
+    else if(debugMode == 4) {
+        // Afficher les coordonnées UV
+        FragColor = vec4(TexCoord, 0.0, 1.0);
+        return;
+    }
+
+    // Lire les données du G-buffer
+    vec4 positionData = texture(gPosition, TexCoord);
+    vec4 normalData = texture(gNormal, TexCoord);
+    vec4 albedoSpecData = texture(gAlbedoSpec, TexCoord);
+
+    // DEBUG: Visualiser les buffers individuellement
+    FragColor = positionData; // Visualiser les positions
+    FragColor = normalData;   // Visualiser les normales
+    FragColor = albedoSpecData; // Visualiser l'albedo
+    return;
+
+    // Vérifier si c'est un pixel valide
+    if(positionData.a < 0.1) {
+        // C'est le fond
+        FragColor = vec4(0.1, 0.1, 0.15, 1.0);
+        return;
+    }
+
+    vec3 fragPos = positionData.rgb;
+    vec3 normal = normalize(normalData.rgb * 2.0 - 1.0); // [0,1] -> [-1,1]
+    vec3 albedo = albedoSpecData.rgb;
+    float specularStrength = albedoSpecData.a;
+
+    // DEBUG: Vérifier que l'albedo n'est pas noir
+     if(length(albedo) < 0.01) {
+         FragColor = vec4(1.0, 0.0, 0.0, 1.0); // Rouge si problème
+         return;
+     }
+
+    // Éclairage
+    vec3 viewDir = normalize(viewPos - fragPos);
+    vec3 lighting = albedo * 0.1; // Ambient
+
+    for(int i = 0; i < pointLightCount; i++){
+        vec3 lightDir = normalize(pointLights[i].position - fragPos);
+
+        // Diffuse
+        float diff = max(dot(normal, lightDir), 0.0);
+        vec3 diffuse = diff * albedo * pointLights[i].color;
+
+        // Specular (Blinn-Phong pour de meilleurs résultats)
+        vec3 halfwayDir = normalize(lightDir + viewDir);
+        float spec = pow(max(dot(normal, halfwayDir), 0.0), specularPow);
+        vec3 specular = specularStrength * spec * pointLights[i].color;
+
+        // Attenuation
+        float distance = length(pointLights[i].position - fragPos);
+        float attenuation = 1.0 / (pointLights[i].constant +
+                          pointLights[i].linear * distance +
+                          pointLights[i].quadratic * (distance * distance));
+
+        lighting += (diffuse + specular) * attenuation;
+    }
+
+    FragColor = vec4(lighting, 1.0);
+})";
 
         cubeProgram_ = createProgram(vs, fs);
-
+        deferredProgram_ = createProgram(drv, drf);
         static constexpr float vertices[] = {
             // +X
             +0.5f, -0.5f, -0.5f, 1, 0, 0, 0, 0, 0, 0, -1,
@@ -473,13 +611,13 @@ void main(){
 
         static constexpr unsigned int indices[] = {
             // +X (flip)
-            0, 2, 1,   0, 3, 2,
+            0, 2, 1, 0, 3, 2,
 
             // -X (flip)
-            4, 6, 5,   4, 7, 6,
+            4, 6, 5, 4, 7, 6,
 
             // +Y (flip)
-            8, 10, 9,  8, 11, 10,
+            8, 10, 9, 8, 11, 10,
 
             // -Y (flip)
             12, 14, 13, 12, 15, 14,
@@ -512,16 +650,16 @@ void main(){
 
         // pos
         glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void*)0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, stride, (void *) 0);
         // normal
         glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, (void*)(3*sizeof(float)));
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, stride, (void *) (3 * sizeof(float)));
         // uv
         glEnableVertexAttribArray(2);
-        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride, (void*)(6*sizeof(float)));
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, stride, (void *) (6 * sizeof(float)));
         // tangent
         glEnableVertexAttribArray(3);
-        glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, stride, (void*)(8*sizeof(float)));
+        glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, stride, (void *) (8 * sizeof(float)));
     }
 
     void initCubeInstancing() {
@@ -552,15 +690,15 @@ void main(){
             });
         }
     }
-    static GLuint loadTexture2D(const std::string& path, bool flipY)
-    {
+
+    static GLuint loadTexture2D(const std::string &path, bool flipY) {
         stbi_set_flip_vertically_on_load(flipY);
 
         int w, h, comp;
-        unsigned char* data = stbi_load(path.c_str(), &w, &h, &comp, 0);
+        unsigned char *data = stbi_load(path.c_str(), &w, &h, &comp, 0);
         if (!data) {
             std::cerr << "[Texture] FAILED: " << path
-                      << " reason: " << stbi_failure_reason() << "\n";
+                    << " reason: " << stbi_failure_reason() << "\n";
             return 0;
         }
 
@@ -668,6 +806,69 @@ void main(){
             4 / 256.0f, 16 / 256.0f, 24 / 256.0f, 16 / 256.0f, 4 / 256.0f,
             1 / 256.0f, 4 / 256.0f, 6 / 256.0f, 4 / 256.0f, 1 / 256.0f
         };
+    }
+
+    void createGBuffer(int width, int height) {
+        glGenFramebuffers(1, &gBuffer_);
+        glBindFramebuffer(GL_FRAMEBUFFER, gBuffer_);
+
+        glGenTextures(1, &gPosition_);
+        glBindTexture(GL_TEXTURE_2D, gPosition_);
+        glTexImage2D(GL_TEXTURE_2D, 0,GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, NULL);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gPosition_, 0);
+
+        // 2. Normales : Format GL_RGBA16F
+        glGenTextures(1, &gNormal_);
+        glBindTexture(GL_TEXTURE_2D, gNormal_);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, NULL);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, gNormal_, 0);
+
+        // 3. Albedo + Spéculaire
+        glGenTextures(1, &gAlbedoSpec_);
+        glBindTexture(GL_TEXTURE_2D, gAlbedoSpec_);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, width, height, 0, GL_RGBA, GL_FLOAT, NULL);
+
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, gAlbedoSpec_, 0);
+
+        // Depth buffer
+        GLuint rboDepth = 0;
+        glGenRenderbuffers(1, &rboDepth);
+        glBindRenderbuffer(GL_RENDERBUFFER, rboDepth);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, width, height);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rboDepth);
+        // ────────────────────────────────────────────────
+
+        GLuint attachments[3] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2};
+        glDrawBuffers(3, attachments);
+
+        // GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+        // if (status != GL_FRAMEBUFFER_COMPLETE) {
+        //     std::cerr << "G-Buffer incomplet ! Status = 0x" << std::hex << status << std::endl;
+        //     // → ajoute un log ici pour debugger
+        // }
+
+        // Vérification
+        if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+            std::cerr << "G-Buffer incomplet ! Status = 0x" << std::hex
+                    << glCheckFramebufferStatus(GL_FRAMEBUFFER) << std::endl;
+        } else {
+            std::cout << "[INFO] G-Buffer created successfully ("
+                      << width << "x" << height << ")" << std::endl;
+        }
+
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
 
     // Création du framebuffer principal
@@ -1051,122 +1252,59 @@ void main(){
         bloomCombineProgram_ = createProgram(bloomVertexShader, bloomCombineFS);
     }
 
+    GLfloat lightX = 0;
+    GLfloat lightY = 0;
+    GLfloat lightZ = 0;
     // Rendu de la scène dans le framebuffer
     void renderSceneToFramebuffer() {
-        glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
+
+        // Calcul caméra (comme avant)
+        float view[16], proj[16];
+        float camX = target_[0] + orbitRadius_ * std::cos(pitch_ * M_PI / 180) * std::cos(yaw_ * M_PI / 180);
+        float camY = target_[1] + orbitRadius_ * std::sin(pitch_ * M_PI / 180);
+        float camZ = target_[2] + orbitRadius_ * std::cos(pitch_ * M_PI / 180) * std::sin(yaw_ * M_PI / 180);
+
+        lookAtMatrix(view, camX, camY, camZ, target_[0], target_[1], target_[2], 0, 1, 0);
+        perspectiveMatrix(proj, 60.0f, (float) width_ / height_, 0.1f, 500.0f);
+
+        // ========== ÉTAPE 1: Remplir le G-buffer ==========
+        glBindFramebuffer(GL_FRAMEBUFFER, gBuffer_);
         glViewport(0, 0, width_, height_);
 
-        glEnable(GL_DEPTH_TEST);
-        glClearColor(0.05f, 0.05f, 0.08f, 1.0f);
+        //Nettoyer avec une couleur noire TRANSPARENTE
+        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // Calcul des matrices
-        float view[16], proj[16], modelMat[16];
-
-        drawnCubes_ = 0;
-        cubeInstanceMatrices_.clear();
-
-
-        float yawRad = yaw_ * 3.1415926535f / 180.0f;
-        float pitchRad = pitch_ * 3.1415926535f / 180.0f;
-
-        // Position caméra
-        float camX = target_[0] + orbitRadius_ * std::cos(pitchRad) * std::cos(yawRad);
-        float camY = target_[1] + orbitRadius_ * std::sin(pitchRad);
-        float camZ = target_[2] + orbitRadius_ * std::cos(pitchRad) * std::sin(yawRad);
-
-        // Matrice de vue
-        lookAtMatrix(view,
-                     camX, camY, camZ,
-                     target_[0], target_[1], target_[2],
-                     0.0f, 1.0f, 0.0f);
-
-        // Matrice de projection
-        perspectiveMatrix(proj, 60.0f, (float) width_ / (float) height_, 0.1f, 500.0f);
-        Frustrum fr = exractFrustrum(proj, view);
-
-        for (const auto &cpos: cubeCenters_) {
-            AABB box;
-            box.mn = {cpos.x - cubeHalfSize_, cpos.y - cubeHalfSize_, cpos.z - cubeHalfSize_};
-            box.mx = {cpos.x + cubeHalfSize_, cpos.y + cubeHalfSize_, cpos.z + cubeHalfSize_};
-
-            if (!aabbInFrustum(fr, box))
-                continue;
-
-            float model[16];
-            identityMatrix(model);
-            model[12] = cpos.x;
-            model[13] = cpos.y;
-            model[14] = cpos.z;
-
-            cubeInstanceMatrices_.insert(
-                cubeInstanceMatrices_.end(), model, model + 16);
-        }
-        // Rotation du modèle
-        identityMatrix(modelMat);
-        float dx = camX - target_[0];
-        float dz = camZ - target_[2];
-        float angleY = std::atan2(dx, dz) + modelYawOffset_;
-
-        float c = std::cos(angleY);
-        float s = std::sin(angleY);
-
-        modelMat[0] = c;
-        modelMat[8] = s;
-        modelMat[2] = -s;
-        modelMat[10] = c;
-        modelMat[13] += -model_->GetMinY();
-
-        // Rendu du modèle
-        glUseProgram(modelProgram_);
-
-        GLint loc;
-        loc = glGetUniformLocation(modelProgram_, "uLightColor");
-        if (loc >= 0)
-            glUniform3f(loc, 1.0f, 1.0f, 1.0f);
-
-        loc = glGetUniformLocation(modelProgram_, "uMaterialShininess");
-        if (loc >= 0)
-            glUniform1f(loc, 32.0f);
-
-        loc = glGetUniformLocation(modelProgram_, "uViewPos");
-        if (loc >= 0)
-            glUniform3f(loc, camX, camY, camZ);
-
-        loc = glGetUniformLocation(modelProgram_, "uLightPos");
-        if (loc >= 0)
-            glUniform3f(loc, target_[0] + 3.0f, target_[1] + 5.0f, target_[2] + 3.0f);
-
-        glUniformMatrix4fv(glGetUniformLocation(modelProgram_, "uModel"), 1, GL_FALSE, modelMat);
-        glUniformMatrix4fv(glGetUniformLocation(modelProgram_, "uView"), 1, GL_FALSE, view);
-        glUniformMatrix4fv(glGetUniformLocation(modelProgram_, "uProj"), 1, GL_FALSE, proj);
-
+        // Activer le test de profondeur
         glEnable(GL_DEPTH_TEST);
         glDepthFunc(GL_LESS);
-        glDepthMask(GL_TRUE);
-        glDisable(GL_BLEND);
-        model_->Draw(modelProgram_);
-        glEnable(GL_BLEND);
 
-        //Cube
         glUseProgram(cubeProgram_);
+
         glUniformMatrix4fv(glGetUniformLocation(cubeProgram_, "uView"), 1, GL_FALSE, view);
         glUniformMatrix4fv(glGetUniformLocation(cubeProgram_, "uProj"), 1, GL_FALSE, proj);
 
-        // caméra + lumière (tu as déjà camX/camY/camZ)
-        glUniform3f(glGetUniformLocation(cubeProgram_, "uViewPosWS"), camX, camY, camZ);
-        glUniform3f(glGetUniformLocation(cubeProgram_, "uLightPosWS"),
-                    target_[0] + 3.0f, target_[1] + 5.0f, target_[2] + 3.0f);
-
-        // diffuse = unit 0
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, cubeDiffuseTex_);
         glUniform1i(glGetUniformLocation(cubeProgram_, "uDiffuse"), 0);
 
-        // normal = unit 1
         glActiveTexture(GL_TEXTURE1);
         glBindTexture(GL_TEXTURE_2D, cubeNormalTex_);
         glUniform1i(glGetUniformLocation(cubeProgram_, "uNormalMap"), 1);
+
+        // Optionnel : activer la normal map (si uniform existe)
+        glUniform1i(glGetUniformLocation(cubeProgram_, "useNormal"), 1);
+
+        // Mise à jour des instances
+        cubeInstanceMatrices_.clear();
+        for (const auto &c: cubeCenters_) {
+            float m[16];
+            identityMatrix(m);
+            m[12] = c.x;
+            m[13] = c.y;
+            m[14] = c.z;
+            cubeInstanceMatrices_.insert(cubeInstanceMatrices_.end(), m, m + 16);
+        }
 
         glBindBuffer(GL_ARRAY_BUFFER, cubeInstanceVBO_);
         glBufferSubData(GL_ARRAY_BUFFER, 0,
@@ -1174,55 +1312,68 @@ void main(){
                         cubeInstanceMatrices_.data());
 
         glBindVertexArray(cubeVAO_);
-        glDrawElementsInstanced(GL_TRIANGLES, cubeIndexCount_, GL_UNSIGNED_INT,
-                                0, (GLsizei) (cubeInstanceMatrices_.size() / 16));
-        drawnCubes_=(int)(cubeInstanceMatrices_.size() / 16);
+        glDrawElementsInstanced(GL_TRIANGLES, cubeIndexCount_, GL_UNSIGNED_INT, 0,
+                                (GLsizei) (cubeInstanceMatrices_.size() / 16));
         glBindVertexArray(0);
 
+        // ========== ÉTAPE 2: Lighting pass ==========
+        glBindFramebuffer(GL_FRAMEBUFFER, 0); // Retour à l'écran principal
+        glViewport(0, 0, screenWidth_, screenHeight_);
 
+        // Nettoyer l'écran avec une couleur de fond
+        glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
+        // Désactiver le test de profondeur pour le quad plein écran
+        glDisable(GL_DEPTH_TEST);
 
-        // Rendu du skybox
-        glDepthFunc(GL_LEQUAL);
-        glDepthMask(GL_FALSE);
+        glUseProgram(deferredProgram_);
 
-        glUseProgram(skyboxProgram_);
-
-        // Vue sans translation pour le skybox
-        float viewNoTrans[16];
-        memcpy(viewNoTrans, view, sizeof(viewNoTrans));
-        viewNoTrans[12] = viewNoTrans[13] = viewNoTrans[14] = 0.0f;
-
-        glUniformMatrix4fv(glGetUniformLocation(skyboxProgram_, "uProj"), 1, GL_FALSE, proj);
-        glUniformMatrix4fv(glGetUniformLocation(skyboxProgram_, "uView"), 1, GL_FALSE, viewNoTrans);
-
+        // Activer les textures du G-buffer
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTex_);
-        glBindVertexArray(skyboxVAO_);
-        glDrawArrays(GL_TRIANGLES, 0, 36);
+        glBindTexture(GL_TEXTURE_2D, gPosition_);
+        glUniform1i(glGetUniformLocation(deferredProgram_, "gPosition"), 0);
 
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, gNormal_);
+        glUniform1i(glGetUniformLocation(deferredProgram_, "gNormal"), 1);
+
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, gAlbedoSpec_);
+        glUniform1i(glGetUniformLocation(deferredProgram_, "gAlbedoSpec"), 2);
+
+        // Uniforms critiques – noms exacts du shader
+        glUniform3f(glGetUniformLocation(deferredProgram_, "viewPos"), camX, camY, camZ);
+        glUniform1f(glGetUniformLocation(deferredProgram_, "specularPow"), 32.0f);
+
+        // Lumière
+        glUniform1i(glGetUniformLocation(deferredProgram_, "pointLightCount"), 1);
+
+        // Position de la lumière qui suit la caméra
+        // float lightX = camX + 5.0f;
+        // float lightY = camY + 5.0f;
+        // float lightZ = camZ + 5.0f;
+        float lightOrbitRadius = 15.0f;
+        float lightAngle = time_ * 0.5f; // Animation lente
+        float lightX = target_[0] + cos(lightAngle) * lightOrbitRadius;
+        float lightY = target_[1] + 8.0f; // Hauteur fixe
+        float lightZ = target_[2] + sin(lightAngle) * lightOrbitRadius;
+
+        glUniform3f(glGetUniformLocation(deferredProgram_, "pointLights[0].position"),
+                    lightX, lightY, lightZ);
+
+        glUniform3f(glGetUniformLocation(deferredProgram_, "pointLights[0].color"),
+                    1.2f, 1.1f, 1.0f);
+        glUniform1f(glGetUniformLocation(deferredProgram_, "pointLights[0].constant"), 1.0f);
+        glUniform1f(glGetUniformLocation(deferredProgram_, "pointLights[0].linear"), 0.09f);
+        glUniform1f(glGetUniformLocation(deferredProgram_, "pointLights[0].quadratic"), 0.032f);
+
+        // Rendu du quad plein écran
+        glBindVertexArray(quadVAO_);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
         glBindVertexArray(0);
-        glUseProgram(0);
-        glDepthMask(GL_TRUE);
-        glDepthFunc(GL_LESS);
-        for (const auto &cpos: cubeCenters_) {
-            AABB box;
-            box.mn = core::Vec3F{cpos.x - cubeHalfSize_, cpos.y - cubeHalfSize_, cpos.z - cubeHalfSize_};
-            box.mx = core::Vec3F{cpos.x + cubeHalfSize_, cpos.y + cubeHalfSize_, cpos.z + cubeHalfSize_};
 
-            if (!aabbInFrustum(fr, box))
-                continue; // ✅ cube hors frustum => pas de draw call
-
-            float cubeModel[16];
-            identityMatrix(cubeModel);
-            cubeModel[12] = cpos.x; // translation en column-major
-            cubeModel[13] = cpos.y;
-            cubeModel[14] = cpos.z;
-            // glUseProgram(cubeProgram_);
-            // glUniformMatrix4fv(uModel/uView/uProj, ...)
-            // glBindVertexArray(cubeVAO_);
-            // glDrawArrays / glDrawElements
-        }
+        glEnable(GL_DEPTH_TEST);
     }
 
     // Rendu avec effet de bloom
@@ -1473,7 +1624,7 @@ void main(){
 
     void initGL() {
         // Créer les shaders
-        modelProgram_ = createModelShaderProgram();
+        //modelProgram_ = createModelShaderProgram();
 
         // Configuration des textures dans le shader
         glUseProgram(modelProgram_);

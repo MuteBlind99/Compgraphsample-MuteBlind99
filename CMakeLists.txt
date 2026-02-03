@@ -114,6 +114,13 @@ add_executable(frustrum_culling_demo main/main_frustrum_culling.cc
 src/model_loader.cc)
 target_link_libraries(frustrum_culling_demo PUBLIC CompGraphLib assimp::assimp)
 
+add_executable(deferred_demo main/main_deferred.cc
+        src/model_loader.cc)
+target_link_libraries(deferred_demo PUBLIC CompGraphLib assimp::assimp)
+
+add_executable(shadow_ssao_demo main/main_shadow_mapping_directional_light.cc
+src/model_loader.cc)
+target_link_libraries(shadow_ssao_demo PUBLIC CompGraphLib assimp::assimp)
 # Option 2: Boucle automatique pour les autres fichiers main (sauf ceux déjà créés)
 
 # Liste des fichiers main déjà traités manuellement
