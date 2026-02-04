@@ -28,10 +28,12 @@ struct Mesh {
     std::vector<Vertex> vertices;
     std::vector<unsigned int> indices;
     std::vector<Texture> textures;
-    GLuint VAO, VBO, EBO;
+    GLuint VAO=0, VBO=0, EBO=0;
 
     void setupMesh();
     void Draw(GLuint shaderProgram);
+    void AttachInstancBuffer(GLuint instanceVBO);
+    void DrawInstanced(GLuint shaderProgram, int instanceCount);
 };
 
 class Model {
@@ -41,6 +43,9 @@ public:
     }
 
     void Draw(GLuint shaderProgram);
+    void AttachInstanceBuffer(GLuint instanceVBO);
+    void DrawInstanced(GLuint shaderProgram, int instanceCount);
+
 
     core::Vec3F aabbMin;
     core::Vec3F aabbMax;
@@ -55,8 +60,6 @@ private:
     std::string directory;
     std::vector<Texture> textures_loaded;
     static GLuint gWhiteTex;
-
-
 
     void loadModel(const std::string& path);
     void processNode(aiNode* node, const aiScene* scene);

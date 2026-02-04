@@ -63,6 +63,17 @@ public:
         createScreenQuad();
         // load model
         model_ = std::make_unique<Model>("data/model/nanosuit2/nanosuit.obj");
+        glGenBuffers(1, &modelInstanceVBO_);
+        glBindBuffer(GL_ARRAY_BUFFER, modelInstanceVBO_);
+        glBufferData(GL_ARRAY_BUFFER,
+                     modelInstanceCount_ * 16 * sizeof(float),
+                     nullptr,
+                     GL_DYNAMIC_DRAW);
+        glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+        // ✅ attacher aux VAO de tous les meshes du modèle
+        model_->AttachInstanceBuffer(modelInstanceVBO_);
+
         core::Vec3F c = model_->GetCenter();
         float offsetY = -model_->GetMinY();
         target_[0] = c.x;
@@ -334,7 +345,7 @@ private:
     std::vector<std::vector<float> > convolutionKernels_;
 
     // Shaders
-    GLuint modelProgram_ = 0;
+    GLuint modelProgram_;
     GLuint skyboxProgram_ = 0;
     GLuint postProgram_ = 0;
     GLuint bloomExtractProgram_ = 0;
@@ -408,6 +419,9 @@ private:
 
     // Modèle
     std::unique_ptr<Model> model_;
+    GLuint modelInstanceVBO_ = 0;
+    std::vector<float> modelInstanceMatrices_; // 16*N floats
+    int modelInstanceCount_ = 5;
 
     struct Plane {
         core::Vec3F n;
@@ -491,50 +505,51 @@ private:
     }
 
     void renderShadowMap() {
-       // Configuration lumière - AUGMENTEZ la taille et ajustez la position
-    float lightPos[3] = {15.0f, 25.0f, 15.0f}; // Plus haut, plus loin
-    float lightTarget[3] = {target_[0], target_[1], target_[2]}; // Cibler le centre de la scène
+        // Configuration lumière - AUGMENTEZ la taille et ajustez la position
+        float lightPos[3] = {15.0f, 25.0f, 15.0f}; // Plus haut, plus loin
+        float lightTarget[3] = {target_[0], target_[1], target_[2]}; // Cibler le centre de la scène
 
-    // Projection orthographique PLUS GRANDE pour couvrir toute la scène
-    float size = 100.0f; // Augmentez considérablement la taille
-    float near_plane = 1.0f, far_plane = 100.0f;
+        // Projection orthographique PLUS GRANDE pour couvrir toute la scène
+        float size = 100.0f; // Augmentez considérablement la taille
+        float near_plane = 1.0f, far_plane = 100.0f;
 
-    // Matrice projection
-    identityMatrix(lightProjection_);
-    lightProjection_[0] = 2.0f / size;
-    lightProjection_[5] = 2.0f / size;
-    lightProjection_[10] = -2.0f / (far_plane - near_plane);
-    lightProjection_[14] = -(far_plane + near_plane) / (far_plane - near_plane);
+        // Matrice projection
+        identityMatrix(lightProjection_);
+        lightProjection_[0] = 2.0f / size;
+        lightProjection_[5] = 2.0f / size;
+        lightProjection_[10] = -2.0f / (far_plane - near_plane);
+        lightProjection_[14] = -(far_plane + near_plane) / (far_plane - near_plane);
 
-    // Matrice vue - vérifiez que la lumière regarde bien vers le bas
-    lookAtMatrix(lightView_, lightPos[0], lightPos[1], lightPos[2],
-                 lightTarget[0], lightTarget[1], lightTarget[2],
-                 0.0f, 1.0f, 0.0f);
+        // Matrice vue - vérifiez que la lumière regarde bien vers le bas
+        lookAtMatrix(lightView_, lightPos[0], lightPos[1], lightPos[2],
+                     lightTarget[0], lightTarget[1], lightTarget[2],
+                     0.0f, 1.0f, 0.0f);
 
-    // DEBUG: Afficher les matrices pour vérification
-    std::cout << "Light Position: " << lightPos[0] << ", " << lightPos[1] << ", " << lightPos[2] << std::endl;
-    std::cout << "Light Target: " << lightTarget[0] << ", " << lightTarget[1] << ", " << lightTarget[2] << std::endl;
-    std::cout << "Ortho Size: " << size << ", Near: " << near_plane << ", Far: " << far_plane << std::endl;
+        // DEBUG: Afficher les matrices pour vérification
+        std::cout << "Light Position: " << lightPos[0] << ", " << lightPos[1] << ", " << lightPos[2] << std::endl;
+        std::cout << "Light Target: " << lightTarget[0] << ", " << lightTarget[1] << ", " << lightTarget[2] <<
+                std::endl;
+        std::cout << "Ortho Size: " << size << ", Near: " << near_plane << ", Far: " << far_plane << std::endl;
 
-    // Matrice espace lumière
-    multiplyMat4(lightSpaceMatrix_, lightProjection_, lightView_);
+        // Matrice espace lumière
+        multiplyMat4(lightSpaceMatrix_, lightProjection_, lightView_);
 
-    // Rendu shadow map
-    glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
-    glBindFramebuffer(GL_FRAMEBUFFER, shadowFBO_);
+        // Rendu shadow map
+        glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
+        glBindFramebuffer(GL_FRAMEBUFFER, shadowFBO_);
 
-    // Effacer avec 1.0 (profondeur maximale)
-    glClearDepth(1.0f);
-    glClear(GL_DEPTH_BUFFER_BIT);
+        // Effacer avec 1.0 (profondeur maximale)
+        glClearDepth(1.0f);
+        glClear(GL_DEPTH_BUFFER_BIT);
 
-    glEnable(GL_DEPTH_TEST);
-    glDepthFunc(GL_LESS);
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_LESS);
 
-    // IMPORTANT: Désactiver le culling pour voir toutes les faces
-    glDisable(GL_CULL_FACE);
+        // IMPORTANT: Désactiver le culling pour voir toutes les faces
+        glDisable(GL_CULL_FACE);
 
-    // Utiliser un shader shadow SIMPLIFIÉ mais qui fonctionne
-    const std::string simpleShadowVS = R"(
+        // Utiliser un shader shadow SIMPLIFIÉ mais qui fonctionne
+        const std::string simpleShadowVS = R"(
         #version 330 core
         layout(location = 0) in vec3 aPos;
 
@@ -546,7 +561,7 @@ private:
         }
     )";
 
-    const std::string simpleShadowFS = R"(
+        const std::string simpleShadowFS = R"(
         #version 330 core
         void main() {
             // Fragment shader minimal mais valide
@@ -554,62 +569,62 @@ private:
         }
     )";
 
-    static GLuint simpleShadowProgram = 0;
-    if (simpleShadowProgram == 0) {
-        simpleShadowProgram = createProgram(simpleShadowVS, simpleShadowFS);
-        std::cout << "Simple shadow program created: " << simpleShadowProgram << std::endl;
-    }
+        static GLuint simpleShadowProgram = 0;
+        if (simpleShadowProgram == 0) {
+            simpleShadowProgram = createProgram(simpleShadowVS, simpleShadowFS);
+            std::cout << "Simple shadow program created: " << simpleShadowProgram << std::endl;
+        }
 
-    glUseProgram(simpleShadowProgram);
+        glUseProgram(simpleShadowProgram);
 
-    // Passer la matrice
-    GLuint loc = glGetUniformLocation(simpleShadowProgram, "uLightSpaceMatrix");
-    if (loc != -1) {
-        glUniformMatrix4fv(loc, 1, GL_FALSE, lightSpaceMatrix_);
-    } else {
-        std::cerr << "ERROR: uLightSpaceMatrix uniform not found!" << std::endl;
-    }
+        // Passer la matrice
+        GLuint loc = glGetUniformLocation(simpleShadowProgram, "uLightSpaceMatrix");
+        if (loc != -1) {
+            glUniformMatrix4fv(loc, 1, GL_FALSE, lightSpaceMatrix_);
+        } else {
+            std::cerr << "ERROR: uLightSpaceMatrix uniform not found!" << std::endl;
+        }
 
-    // DEBUG: Dessiner TOUS les cubes
-    glBindVertexArray(cubeVAO_);
+        // DEBUG: Dessiner TOUS les cubes
+        glBindVertexArray(cubeVAO_);
 
-    // Cube au centre
-    float modelMatrix[16];
-    identityMatrix(modelMatrix);
-    modelMatrix[12] = target_[0];
-    modelMatrix[13] = target_[1];
-    modelMatrix[14] = target_[2];
-
-    loc = glGetUniformLocation(simpleShadowProgram, "uModel");
-    if (loc != -1) {
-        glUniformMatrix4fv(loc, 1, GL_FALSE, modelMatrix);
-    }
-
-    glDrawElements(GL_TRIANGLES, cubeIndexCount_, GL_UNSIGNED_INT, 0);
-
-    // Tous les cubes de la ligne
-    for (int i = 0; i < cubeCenters_.size(); ++i) {
+        // Cube au centre
+        float modelMatrix[16];
         identityMatrix(modelMatrix);
-        modelMatrix[12] = cubeCenters_[i].x;
-        modelMatrix[13] = cubeCenters_[i].y;
-        modelMatrix[14] = cubeCenters_[i].z;
+        modelMatrix[12] = target_[0];
+        modelMatrix[13] = target_[1];
+        modelMatrix[14] = target_[2];
 
+        loc = glGetUniformLocation(simpleShadowProgram, "uModel");
         if (loc != -1) {
             glUniformMatrix4fv(loc, 1, GL_FALSE, modelMatrix);
         }
 
         glDrawElements(GL_TRIANGLES, cubeIndexCount_, GL_UNSIGNED_INT, 0);
-    }
 
-    glBindVertexArray(0);
-    glUseProgram(0);
+        // Tous les cubes de la ligne
+        for (int i = 0; i < cubeCenters_.size(); ++i) {
+            identityMatrix(modelMatrix);
+            modelMatrix[12] = cubeCenters_[i].x;
+            modelMatrix[13] = cubeCenters_[i].y;
+            modelMatrix[14] = cubeCenters_[i].z;
 
-    // Restaurer
-    glEnable(GL_CULL_FACE);
-    glCullFace(GL_BACK);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            if (loc != -1) {
+                glUniformMatrix4fv(loc, 1, GL_FALSE, modelMatrix);
+            }
 
-    std::cout << "DEBUG: Shadow map rendered with " << (cubeCenters_.size() + 1) << " objects" << std::endl;
+            glDrawElements(GL_TRIANGLES, cubeIndexCount_, GL_UNSIGNED_INT, 0);
+        }
+
+        glBindVertexArray(0);
+        glUseProgram(0);
+
+        // Restaurer
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_BACK);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+        std::cout << "DEBUG: Shadow map rendered with " << (cubeCenters_.size() + 1) << " objects" << std::endl;
     }
 
     //SSAO
@@ -854,6 +869,23 @@ private:
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         glEnable(GL_DEPTH_TEST);
+
+        glBindFramebuffer(GL_FRAMEBUFFER, gBuffer_);
+
+        GLenum attachments[3] = {
+            GL_COLOR_ATTACHMENT0,
+            GL_COLOR_ATTACHMENT1,
+            GL_COLOR_ATTACHMENT2
+        };
+        glDrawBuffers(3, attachments);
+
+        // Clear explicite de chaque attachment (plus fiable que glClearColor + glClear)
+        const GLfloat zero[4] = {0,0,0,0};
+        glClearBufferfv(GL_COLOR, 0, zero);
+        glClearBufferfv(GL_COLOR, 1, zero);
+        glClearBufferfv(GL_COLOR, 2, zero);
+        glClear(GL_DEPTH_BUFFER_BIT);
+
         renderGeometryPass(view, proj);
 
         // Étape 2: TEST SIMPLE - Afficher juste l'albedo
@@ -930,6 +962,9 @@ private:
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         glEnable(GL_DEPTH_TEST);
+        // Rendu de la skybox
+        renderSkybox(view, proj);
+        // Rendu de la géométrie
         renderGeometryPass(view, proj); // CE N'ÉTAIT PAS APPELÉ !
 
         // Lighting pass avec ombres
@@ -1084,6 +1119,8 @@ private:
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glDisable(GL_DEPTH_TEST);
 
+        renderSkybox(view, proj);
+
         // Shader SSAO avec occlusion réelle
         const std::string ssaoFS = R"(
         #version 330 core
@@ -1178,48 +1215,48 @@ private:
 
     void renderDebugShadow() {
         // 1. Vérifier d'abord le FBO
-    checkShadowFBO();
+        checkShadowFBO();
 
-    // 2. Rendre la shadow map AVEC DEBUG VISUEL
-    std::cout << "=== DEBUG SHADOW MAP ===" << std::endl;
-    renderShadowMap();
+        // 2. Rendre la shadow map AVEC DEBUG VISUEL
+        std::cout << "=== DEBUG SHADOW MAP ===" << std::endl;
+        renderShadowMap();
 
-    // 3. Lire et analyser les données
-    std::vector<float> depthData(SHADOW_WIDTH * SHADOW_HEIGHT);
-    glBindTexture(GL_TEXTURE_2D, shadowDepthTex_);
-    glGetTexImage(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, GL_FLOAT, depthData.data());
-    glBindTexture(GL_TEXTURE_2D, 0);
+        // 3. Lire et analyser les données
+        std::vector<float> depthData(SHADOW_WIDTH * SHADOW_HEIGHT);
+        glBindTexture(GL_TEXTURE_2D, shadowDepthTex_);
+        glGetTexImage(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, GL_FLOAT, depthData.data());
+        glBindTexture(GL_TEXTURE_2D, 0);
 
-    // Analyse plus détaillée
-    int validPixels = 0;
-    float minDepth = 1.0f, maxDepth = 0.0f;
-    float sumDepth = 0.0f;
+        // Analyse plus détaillée
+        int validPixels = 0;
+        float minDepth = 1.0f, maxDepth = 0.0f;
+        float sumDepth = 0.0f;
 
-    for (int i = 0; i < SHADOW_WIDTH * SHADOW_HEIGHT; i++) {
-        if (depthData[i] < 1.0f) {
-            validPixels++;
-            if (depthData[i] < minDepth) minDepth = depthData[i];
-            if (depthData[i] > maxDepth) maxDepth = depthData[i];
-            sumDepth += depthData[i];
+        for (int i = 0; i < SHADOW_WIDTH * SHADOW_HEIGHT; i++) {
+            if (depthData[i] < 1.0f) {
+                validPixels++;
+                if (depthData[i] < minDepth) minDepth = depthData[i];
+                if (depthData[i] > maxDepth) maxDepth = depthData[i];
+                sumDepth += depthData[i];
+            }
         }
-    }
 
-    std::cout << "DEBUG Shadow Map Analysis:" << std::endl;
-    std::cout << "  Valid pixels (depth < 1.0): " << validPixels << "/"
-              << (SHADOW_WIDTH * SHADOW_HEIGHT) << std::endl;
-    std::cout << "  Min depth: " << minDepth << std::endl;
-    std::cout << "  Max depth: " << maxDepth << std::endl;
-    std::cout << "  Avg depth (valid): " << (validPixels > 0 ? sumDepth/validPixels : 0) << std::endl;
+        std::cout << "DEBUG Shadow Map Analysis:" << std::endl;
+        std::cout << "  Valid pixels (depth < 1.0): " << validPixels << "/"
+                << (SHADOW_WIDTH * SHADOW_HEIGHT) << std::endl;
+        std::cout << "  Min depth: " << minDepth << std::endl;
+        std::cout << "  Max depth: " << maxDepth << std::endl;
+        std::cout << "  Avg depth (valid): " << (validPixels > 0 ? sumDepth / validPixels : 0) << std::endl;
 
-    // 4. Afficher la texture
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    glViewport(0, 0, screenWidth_, screenHeight_);
-    glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    glDisable(GL_DEPTH_TEST);
+        // 4. Afficher la texture
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glViewport(0, 0, screenWidth_, screenHeight_);
+        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glDisable(GL_DEPTH_TEST);
 
-    // Shader debug amélioré
-    const std::string debugFS = R"(
+        // Shader debug amélioré
+        const std::string debugFS = R"(
         #version 330 core
         out vec4 FragColor;
         in vec2 TexCoord;
@@ -1251,9 +1288,9 @@ private:
         }
     )";
 
-    static GLuint debugProgram = 0;
-    if (debugProgram == 0) {
-        const std::string vs = R"(
+        static GLuint debugProgram = 0;
+        if (debugProgram == 0) {
+            const std::string vs = R"(
             #version 330 core
             layout(location=0) in vec2 aPos;
             layout(location=1) in vec2 aTexCoord;
@@ -1263,26 +1300,26 @@ private:
                 gl_Position = vec4(aPos, 0.0, 1.0);
             }
         )";
-        debugProgram = createProgram(vs, debugFS);
-        std::cout << "Debug shadow program created: " << debugProgram << std::endl;
-    }
+            debugProgram = createProgram(vs, debugFS);
+            std::cout << "Debug shadow program created: " << debugProgram << std::endl;
+        }
 
-    glUseProgram(debugProgram);
+        glUseProgram(debugProgram);
 
-    glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, shadowDepthTex_);
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, shadowDepthTex_);
 
-    // Important: Définir les paramètres de texture pour l'affichage
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        // Important: Définir les paramètres de texture pour l'affichage
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-    glUniform1i(glGetUniformLocation(debugProgram, "depthMap"), 0);
+        glUniform1i(glGetUniformLocation(debugProgram, "depthMap"), 0);
 
-    glBindVertexArray(quadVAO_);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
-    glBindVertexArray(0);
+        glBindVertexArray(quadVAO_);
+        glDrawArrays(GL_TRIANGLES, 0, 6);
+        glBindVertexArray(0);
 
-    glEnable(GL_DEPTH_TEST);
+        glEnable(GL_DEPTH_TEST);
     }
 
     void renderDebugSSAO() {
@@ -1360,8 +1397,33 @@ private:
         perspectiveMatrix(proj, 60.0f, (float) width_ / height_, 0.1f, 500.0f);
     }
 
+    void renderModelInstance(float *view, float *proj, float *modelMatrix) {
+        if (!model_)return;
+        // Vous avez besoin d'un shader spécifique pour le modèle
+        // Soit vous utilisez le cubeProgram_ si compatible,
+        // soit vous créez un nouveau shader
+
+        // Exemple avec cubeProgram_ (adaptez selon vos besoins)
+        glUseProgram(modelProgram_);
+
+        // Passer les matrices
+        glUniformMatrix4fv(glGetUniformLocation(cubeProgram_, "uView"), 1, GL_FALSE, view);
+        glUniformMatrix4fv(glGetUniformLocation(cubeProgram_, "uProj"), 1, GL_FALSE, proj);
+
+        // Passer la matrice modèle
+        GLuint modelLoc = glGetUniformLocation(cubeProgram_, "uModel");
+        if (modelLoc != -1) {
+            glUniformMatrix4fv(modelLoc, 1, GL_FALSE, modelMatrix);
+        }
+
+        // Utiliser les textures du modèle (à adapter selon votre modèle)
+        model_->Draw(modelProgram_); // Supposant que votre modèle a une méthode Draw()
+    }
+
     void renderGeometryPass(float *view, float *proj) {
+        //Rendu des cubes
         glUseProgram(cubeProgram_);
+
 
         glUniformMatrix4fv(glGetUniformLocation(cubeProgram_, "uView"), 1, GL_FALSE, view);
         glUniformMatrix4fv(glGetUniformLocation(cubeProgram_, "uProj"), 1, GL_FALSE, proj);
@@ -1376,7 +1438,7 @@ private:
 
         glUniform1i(glGetUniformLocation(cubeProgram_, "useNormal"), 1);
 
-        // Mise à jour des instances
+        // Mise à jour des instances des cubes
         cubeInstanceMatrices_.clear();
         for (const auto &c: cubeCenters_) {
             float m[16];
@@ -1396,13 +1458,55 @@ private:
         glDrawElementsInstanced(GL_TRIANGLES, cubeIndexCount_, GL_UNSIGNED_INT, 0,
                                 (GLsizei) (cubeInstanceMatrices_.size() / 16));
         glBindVertexArray(0);
+
+        // Rendu du modèle nanosuit avec instanciation
+
+
+            // ===== Model instanced (nanosuit) =====
+        if (model_) {
+            modelInstanceMatrices_.clear();
+            modelInstanceMatrices_.reserve(modelInstanceCount_ * 16);
+
+            for (int i = 0; i < modelInstanceCount_; ++i) {
+                float M[16];
+                identityMatrix(M);
+
+                float angle = (2.0f * M_PI / float(modelInstanceCount_)) * float(i);
+                float radius = 10.0f;
+
+                // scale
+                float s = 0.5f;
+                M[0] = s; M[5] = s; M[10] = s;
+
+                // translation (col-major)
+                M[12] = target_[0] + std::cos(angle) * radius;
+                M[13] = target_[1] + 0.5f;
+                M[14] = target_[2] + std::sin(angle) * radius;
+
+                modelInstanceMatrices_.insert(modelInstanceMatrices_.end(), M, M + 16);
+            }
+
+            // upload vers le VBO
+            glBindBuffer(GL_ARRAY_BUFFER, modelInstanceVBO_);
+            glBufferSubData(GL_ARRAY_BUFFER, 0,
+                            modelInstanceMatrices_.size() * sizeof(float),
+                            modelInstanceMatrices_.data());
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+            // draw instanced dans le GBuffer
+            glUseProgram(modelProgram_);
+            glUniformMatrix4fv(glGetUniformLocation(modelProgram_, "uView"), 1, GL_FALSE, view);
+            glUniformMatrix4fv(glGetUniformLocation(modelProgram_, "uProj"), 1, GL_FALSE, proj);
+
+            model_->DrawInstanced(modelProgram_, modelInstanceCount_);
+            }
     }
 
     void checkShadowFBO() const {
         glBindFramebuffer(GL_FRAMEBUFFER, shadowFBO_);
         GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 
-        switch(status) {
+        switch (status) {
             case GL_FRAMEBUFFER_COMPLETE:
                 std::cout << "Shadow FBO: Complete" << std::endl;
                 break;
@@ -1799,9 +1903,9 @@ void main(){
         // Positionnez les cubes autour du centre de la scène
         for (int i = -20; i <= 20; ++i) {
             cubeCenters_.push_back(core::Vec3F{
-                target_[0] + i * 3.0f,  // Plus espacés
-                target_[1] + 0.5f,      // Un peu au-dessus du sol
-                target_[2] - 10.0f      // Devant la caméra
+                target_[0] + i * 3.0f, // Plus espacés
+                target_[1] + 0.5f, // Un peu au-dessus du sol
+                target_[2] - 10.0f // Devant la caméra
             });
         }
 
@@ -2599,122 +2703,65 @@ void main(){
         // Vertex Shader
         const char *vertexSource = R"(
          #version 330 core
-    precision mediump float;
+         precision mediump float;
 
-    layout(location = 0) in vec3 aPosition;
-    layout(location = 1) in vec3 aNormal;
-    layout(location = 2) in vec2 aTexCoord;
+         layout(location=0) in vec3 aPos;
+        layout(location=1) in vec3 aNormal;
+        layout(location=2) in vec2 aTex;
 
-    out vec3 FragPos;
-    out vec3 Normal;
-    out vec2 TexCoord;
+        // instancing mat4 : locations 5..8
+        layout(location=5) in vec4 iM0;
+        layout(location=6) in vec4 iM1;
+        layout(location=7) in vec4 iM2;
+        layout(location=8) in vec4 iM3;
 
-    uniform mat4 uModel;
-    uniform mat4 uView;
-    uniform mat4 uProj;
+        uniform mat4 uView;
+        uniform mat4 uProj;
 
-    void main() {
-        FragPos = vec3(uModel * vec4(aPosition, 1.0));
+        out vec3 vWorldPos;
+        out vec3 vWorldNormal;
+        out vec2 vUV;
 
-        // SIMPLIFIÉ: pas de transformation inverse/transpose
-        Normal = normalize(mat3(uModel) * aNormal);
+        void main() {
+            mat4 M = mat4(iM0, iM1, iM2, iM3);
 
-        // OU: utiliser directement les normales du modèle
-        Normal = normalize(aNormal);
+            vec4 worldPos = M * vec4(aPos, 1.0);
+            vWorldPos = worldPos.xyz;
 
-        TexCoord = aTexCoord;
-        gl_Position = uProj * uView * vec4(FragPos, 1.0);
-    }
-)";
+            mat3 N = mat3(transpose(inverse(M)));
+            vWorldNormal = normalize(N * aNormal);
 
-        // UTILISEZ CE SHADER POUR DEBUG
+            vUV = aTex;
+            gl_Position = uProj * uView * worldPos;
+        }
+    )";
         const char *fragmentSource = R"(
         #version 330 core
         precision mediump float;
 
-        in vec3 FragPos;
-        in vec3 Normal;
-        in vec2 TexCoord;
+         layout(location=0) out vec4 gPosition;
+        layout(location=1) out vec4 gNormal;
+        layout(location=2) out vec4 gAlbedoSpec;
 
-        out vec4 FragColor;
+        in vec3 vWorldPos;
+        in vec3 vWorldNormal;
+        in vec2 vUV;
 
         uniform sampler2D texture_diffuse1;
-        uniform vec3 uViewPos;
-        uniform vec3 uLightPos;
-        uniform vec3 uLightColor;
-        uniform float uMaterialShininess;
-
-        uniform int uDebugMode; // 0=normal, 1=normales, 2=lightDir, 3=diffuse, 4=texture
 
         void main() {
-            // MODE DEBUG - changer avec les touches
-            if (uDebugMode == 1) {
-                // Afficher les normales
-                FragColor = vec4(normalize(Normal) * 0.5 + 0.5, 1.0);
-                return;
-            }
+            gPosition = vec4(vWorldPos, 1.0);
+            gNormal   = vec4(normalize(vWorldNormal), 1.0);
 
-            if (uDebugMode == 2) {
-                // Afficher la direction de la lumière
-                vec3 lightDir = normalize(uLightPos - FragPos);
-                FragColor = vec4(lightDir * 0.5 + 0.5, 1.0);
-                return;
-            }
+            vec3 albedo = texture(texture_diffuse1, vUV).rgb;
 
-            if (uDebugMode == 3) {
-                // Afficher seulement la composante diffuse
-                vec3 norm = normalize(Normal);
-                vec3 lightDir = normalize(uLightPos - FragPos);
-                float NdotL = dot(norm, lightDir);
-                float diff = abs(NdotL); // Utiliser la valeur absolue
-                FragColor = vec4(vec3(diff), 1.0);
-                return;
-            }
+            // ✅ fallback si texture vide
+            if(length(albedo) < 0.001) albedo = vec3(0.8);
 
-            if (uDebugMode == 4) {
-                // Afficher seulement la texture
-                vec4 texSample = texture(texture_diffuse1, TexCoord);
-                FragColor = texSample;
-                return;
-            }
-
-            // MODE NORMAL (avec fallback si problème)
-            vec4 texSample = texture(texture_diffuse1, TexCoord);
-            vec3 diffuseColor;
-
-            if (length(texSample.rgb) < 0.01) {
-                // Fallback - couleur basée sur la normale
-                diffuseColor = normalize(Normal) * 0.5 + 0.5;
-            } else {
-                diffuseColor = texSample.rgb;
-            }
-
-            // Ambient FORCÉ (même si lumière éteinte)
-            vec3 ambient = diffuseColor * 0.8; // 80% d'ambient minimum
-
-            // Diffuse
-            vec3 norm = normalize(Normal);
-            vec3 lightDir = normalize(uLightPos - FragPos);
-            float diff = max(dot(norm, lightDir), 0.0);
-            vec3 diffuse = uLightColor * diff * diffuseColor;
-
-            // Specular (optionnel)
-            vec3 viewDir = normalize(uViewPos - FragPos);
-            vec3 reflectDir = reflect(-lightDir, norm);
-            float spec = pow(max(dot(viewDir, reflectDir), 0.0), uMaterialShininess);
-            vec3 specular = uLightColor * spec * 0.8;
-
-            // Résultat avec ambient garanti
-            vec3 result = ambient + diffuse + specular;
-
-            // S'assurer que le résultat n'est pas noir
-            if (length(result) < 0.01) {
-                result = diffuseColor; // Fallback à la couleur de base
-            }
-
-            FragColor = vec4(result, 1.0);
+            gAlbedoSpec = vec4(albedo, 1.0);
         }
     )";
+        return createProgram(vertexSource,fragmentSource);
 
         GLuint vertexShader = compileShader(GL_VERTEX_SHADER, vertexSource);
         GLuint fragmentShader = compileShader(GL_FRAGMENT_SHADER, fragmentSource);
@@ -2741,11 +2788,13 @@ void main(){
 
     void initGL() {
         // Créer les shaders
-        //modelProgram_ = createModelShaderProgram();
+        modelProgram_ = createModelShaderProgram();
 
         // Configuration des textures dans le shader
         glUseProgram(modelProgram_);
-
+        glUseProgram(modelProgram_);
+        glUniform1i(glGetUniformLocation(modelProgram_, "texture_diffuse1"), 0);
+        glUseProgram(0);
         // Définir les locations des textures
         GLint diffuseLoc = glGetUniformLocation(modelProgram_, "texture_diffuse1");
         GLint specularLoc = glGetUniformLocation(modelProgram_, "texture_specular1");
@@ -2853,6 +2902,32 @@ void main(){
             "data/assets/front.jpg",
             "data/assets/back.jpg"
         });
+    }
+
+    void renderSkybox(float *view, float *proj) {
+        if (!skyboxProgram_ || !cubemapTex_) return;
+        glDisable(GL_CULL_FACE);
+        glDepthFunc(GL_LEQUAL);  // Permettre à la skybox d'être au fond
+
+        glUseProgram(skyboxProgram_);
+
+        // Passer les matrices sans translation
+        float viewNoTranslation[16];
+        memcpy(viewNoTranslation,view,16 * sizeof(float));
+        viewNoTranslation[12]=0;
+        viewNoTranslation[13]=0;
+        viewNoTranslation[14]=0;
+
+        glUniformMatrix4fv(glGetUniformLocation(skyboxProgram_, "uView"), 1, GL_FALSE, viewNoTranslation);
+        glUniformMatrix4fv(glGetUniformLocation(skyboxProgram_, "uProj"), 1, GL_FALSE, proj);
+
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTex_);
+        glBindVertexArray(skyboxVAO_);
+        glDrawArrays(GL_TRIANGLES, 0, 36);
+        glBindVertexArray(0);
+        glDepthFunc(GL_LESS);
+        glEnable(GL_CULL_FACE);
     }
 
     static GLuint loadCubemap(const std::vector<std::string> &path) {
@@ -3086,7 +3161,7 @@ std::unique_ptr<FramebufferRenderer> g_framebufferDemo;
 int main() {
     try {
         std::cout << "========================================" << std::endl;
-        std::cout << "FrameBuffer DEMO - Techniques Avancé" << std::endl;
+        std::cout << "Shadow/SSAO DEMO - Techniques Avancé" << std::endl;
         std::cout << "========================================" << std::endl;
         std::cout << "Contrôles:" << std::endl;
         std::cout << "  TAB: Toggle camera control" << std::endl;
@@ -3102,7 +3177,7 @@ int main() {
         common::WindowConfig config;
         config.width = 1280;
         config.height = 720;
-        config.title = "FrameBuffer Demo - Post-Processing Avancé";
+        config.title = "Shadow/SSAO Demo - Techniques Avancé";
         config.renderer = common::WindowConfig::RendererType::OPENGL;
         config.fixed_dt = 1.0f / 60.0f;
         common::SetWindowConfig(config);

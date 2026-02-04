@@ -84,9 +84,84 @@ void Mesh::Draw(GLuint shaderProgram) {
     glActiveTexture(GL_TEXTURE0);
 }
 
+void Mesh::AttachInstancBuffer(GLuint instanceVBO) {
+    glBindVertexArray(VAO);
+
+    glBindBuffer(GL_ARRAY_BUFFER, instanceVBO);
+
+
+    constexpr GLsizei vec4Size = sizeof(float) * 4;
+    constexpr GLsizei mat4Size = sizeof(float) * 16;
+
+    // mat4 = 4 vec4 : locations 5,6,7,8
+    for (int i = 0; i < 4; ++i)
+    {
+        glEnableVertexAttribArray(5 + i);
+        glVertexAttribPointer(5+ i, 4, GL_FLOAT, GL_FALSE, mat4Size, (void*)(i * vec4Size));
+        glVertexAttribDivisor(5 + i, 1); // <-- 1 par instance
+    }
+
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
+void Mesh::DrawInstanced(GLuint shaderProgram, int instanceCount) {
+    unsigned int diffuseNr = 1;
+    unsigned int specularNr = 1;
+    unsigned int normalNr = 1;
+    unsigned int heightNr = 1;
+
+    for (unsigned int i = 0; i < textures.size(); i++) {
+        glActiveTexture(GL_TEXTURE0 + i);
+
+        std::string number;
+        std::string name = textures[i].type;
+
+        if (name == "texture_diffuse")
+            number = std::to_string(diffuseNr++);
+        else if (name == "texture_specular")
+            number = std::to_string(specularNr++);
+        else if (name == "texture_normal")
+            number = std::to_string(normalNr++);
+        else if (name == "texture_height")
+            number = std::to_string(heightNr++);
+
+        // Set the sampler to the correct texture unit
+        glUniform1i(glGetUniformLocation(shaderProgram,
+                    (name + number).c_str()), i);
+
+        // And finally bind the texture
+        glBindTexture(GL_TEXTURE_2D, textures[i].id);
+    }
+    for (int u = 2; u < 8; ++u) {
+        glActiveTexture(GL_TEXTURE0+u);
+        glBindTexture(GL_TEXTURE_2D, 0);
+    }
+    glActiveTexture(GL_TEXTURE0);
+    // Draw mesh
+    glBindVertexArray(VAO);
+    glDrawElementsInstanced(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0,instanceCount);
+    glBindVertexArray(0);
+
+    // Set everything back to defaults
+    glActiveTexture(GL_TEXTURE0);
+}
+
 void Model::Draw(GLuint shaderProgram) {
     for (unsigned int i = 0; i < meshes.size(); i++) {
         meshes[i].Draw(shaderProgram);
+    }
+}
+
+void Model::AttachInstanceBuffer(GLuint instanceVBO) {
+    for (auto& m : meshes) {
+        m.AttachInstancBuffer(instanceVBO);
+    }
+}
+
+void Model::DrawInstanced(GLuint shaderProgram, int instanceCount) {
+    for (auto& m : meshes) {
+        m.DrawInstanced(shaderProgram, instanceCount);
     }
 }
 
