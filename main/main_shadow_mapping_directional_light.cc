@@ -279,6 +279,7 @@ private:
     float camPos_[3] = {0.0f, 0.0f, 3.0f};
     float camFront_[3] = {0.0f, 0.0f, 1.0f};
     float camUp_[3] = {0.0f, 1.0f, 0.0f};
+    float far=500.f;
 
     float yaw_ = -90.0f; // regarde vers -Z
     float pitch_ = 0.0f;
@@ -345,7 +346,7 @@ private:
     std::vector<std::vector<float> > convolutionKernels_;
 
     // Shaders
-    GLuint modelProgram_;
+    GLuint modelProgram_ = 0;
     GLuint skyboxProgram_ = 0;
     GLuint postProgram_ = 0;
     GLuint bloomExtractProgram_ = 0;
@@ -821,7 +822,7 @@ private:
         glActiveTexture(GL_TEXTURE2);
         glBindTexture(GL_TEXTURE_2D, noiseTexture_);
         glUniform1i(glGetUniformLocation(ssaoProgram_, "texNoise"), 2);
-
+        glEnable(GL_DEPTH_TEST);
         // Passer le kernel SSAO (16 premiers samples)
         int samplesToUse = std::min(64, ssaoKernelSize_);
         for (int i = 0; i < samplesToUse; ++i) {
@@ -859,6 +860,7 @@ private:
 
     // Modes de Rendu
     void renderDeferred() {
+        glEnable(GL_DEPTH_TEST);
         float view[16], proj[16];
         calculateCameraMatrices(view, proj);
 
@@ -868,33 +870,18 @@ private:
         glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        glEnable(GL_DEPTH_TEST);
-
-        glBindFramebuffer(GL_FRAMEBUFFER, gBuffer_);
-
-        GLenum attachments[3] = {
-            GL_COLOR_ATTACHMENT0,
-            GL_COLOR_ATTACHMENT1,
-            GL_COLOR_ATTACHMENT2
-        };
-        glDrawBuffers(3, attachments);
-
-        // Clear explicite de chaque attachment (plus fiable que glClearColor + glClear)
-        const GLfloat zero[4] = {0,0,0,0};
-        glClearBufferfv(GL_COLOR, 0, zero);
-        glClearBufferfv(GL_COLOR, 1, zero);
-        glClearBufferfv(GL_COLOR, 2, zero);
-        glClear(GL_DEPTH_BUFFER_BIT);
+        // Désactiver l'écriture en profondeur pour la skybox
+        glDepthMask(GL_FALSE);  // <-- IMPORTANT
+        renderSkybox(view, proj);
+        glDepthMask(GL_TRUE);   // <-- Rétablir
 
         renderGeometryPass(view, proj);
 
-        // Étape 2: TEST SIMPLE - Afficher juste l'albedo
+        // Étape 2: Lighting pass AVEC skybox
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glViewport(0, 0, screenWidth_, screenHeight_);
         glClearColor(0.1f, 0.1f, 0.15f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-        glDisable(GL_DEPTH_TEST);
 
         // Shader simplifié pour debug
         const std::string debugVS = R"(
@@ -916,6 +903,8 @@ private:
         uniform sampler2D gAlbedoSpec;
 
         void main() {
+
+
             // Juste afficher l'albedo
             vec4 albedo = texture(gAlbedoSpec, TexCoord);
 
@@ -929,22 +918,72 @@ private:
         }
     )";
 
+
         static GLuint debugProgram = 0;
         if (debugProgram == 0) {
             debugProgram = createProgram(debugVS, debugFS);
         }
 
-        glUseProgram(debugProgram);
+        // UTILISEZ LE VRAI SHADER DEFERRED (celui qui affiche la skybox)
+        glUseProgram(deferredProgram_);
 
+        // Textures du G-buffer
         glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, gAlbedoSpec_);
-        glUniform1i(glGetUniformLocation(debugProgram, "gAlbedoSpec"), 0);
+        glBindTexture(GL_TEXTURE_2D, gPosition_);
+        glUniform1i(glGetUniformLocation(deferredProgram_, "gPosition"), 0);
 
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, gNormal_);
+        glUniform1i(glGetUniformLocation(deferredProgram_, "gNormal"), 1);
+
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, gAlbedoSpec_);
+        glUniform1i(glGetUniformLocation(deferredProgram_, "gAlbedoSpec"), 2);
+
+        // Uniforms pour la skybox
+        glUniform3f(glGetUniformLocation(deferredProgram_, "viewPos"),
+                    camPos_[0], camPos_[1], camPos_[2]);
+        glUniform1f(glGetUniformLocation(deferredProgram_, "specularPow"), 32.0f);
+
+        // Lumière (comme dans votre ancien projet)
+        glUniform1i(glGetUniformLocation(deferredProgram_, "pointLightCount"), 1);
+        glUniform1f(glGetUniformLocation(deferredProgram_,"far"),far );
+
+        // Position de la lumière (animation)
+        float lightAngle = time_ * 0.5f;
+        float lightX = target_[0] + cos(lightAngle) * 15.0f;
+        float lightY = target_[1] + 8.0f;
+        float lightZ = target_[2] + sin(lightAngle) * 15.0f;
+
+        glUniform3f(glGetUniformLocation(deferredProgram_, "pointLights[0].position"),
+                    lightX, lightY, lightZ);
+        glUniform3f(glGetUniformLocation(deferredProgram_, "pointLights[0].color"),
+                    1.2f, 1.1f, 1.0f);
+        glUniform1f(glGetUniformLocation(deferredProgram_, "pointLights[0].constant"), 1.0f);
+        glUniform1f(glGetUniformLocation(deferredProgram_, "pointLights[0].linear"), 0.09f);
+        glUniform1f(glGetUniformLocation(deferredProgram_, "pointLights[0].quadratic"), 0.032f);
+
+        // Skybox texture
+        glActiveTexture(GL_TEXTURE5);
+        glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTex_);
+        glUniform1i(glGetUniformLocation(deferredProgram_, "uSkybox"), 5);
+
+        // Mode normal (pas debug)
+        glUniform1i(glGetUniformLocation(deferredProgram_, "debugMode"), 0);
+
+        // Matrices inverses pour le ray marching de la skybox
+        float invProj[16], invView[16];
+
+        glUniformMatrix4fv(glGetUniformLocation(deferredProgram_, "invProj"), 1, GL_FALSE, invProj);
+        glUniformMatrix4fv(glGetUniformLocation(deferredProgram_, "invViewRot"), 1, GL_FALSE, invView);
+
+
+        // Rendu du quad plein écran
         glBindVertexArray(quadVAO_);
         glDrawArrays(GL_TRIANGLES, 0, 6);
         glBindVertexArray(0);
-
-        glEnable(GL_DEPTH_TEST);
+        //renderSkybox(view, proj);
+        glDisable(GL_DEPTH_TEST);
     }
 
     void renderShadowMapping() {
@@ -1107,6 +1146,9 @@ private:
         glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glEnable(GL_DEPTH_TEST);
+
+        renderSkybox(view, proj);
+
         renderGeometryPass(view, proj);
 
         // 2. SSAO pass - DÉCOMMENTER cette ligne !
@@ -1119,7 +1161,6 @@ private:
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         glDisable(GL_DEPTH_TEST);
 
-        renderSkybox(view, proj);
 
         // Shader SSAO avec occlusion réelle
         const std::string ssaoFS = R"(
@@ -1394,7 +1435,7 @@ private:
         camPos_[2] = camZ;
 
         lookAtMatrix(view, camX, camY, camZ, target_[0], target_[1], target_[2], 0, 1, 0);
-        perspectiveMatrix(proj, 60.0f, (float) width_ / height_, 0.1f, 500.0f);
+        perspectiveMatrix(proj, 60.0f, (float) width_ / height_, 0.1f, far);
     }
 
     void renderModelInstance(float *view, float *proj, float *modelMatrix) {
@@ -1403,7 +1444,7 @@ private:
         // Soit vous utilisez le cubeProgram_ si compatible,
         // soit vous créez un nouveau shader
 
-        // Exemple avec cubeProgram_ (adaptez selon vos besoins)
+
         glUseProgram(modelProgram_);
 
         // Passer les matrices
@@ -1462,7 +1503,7 @@ private:
         // Rendu du modèle nanosuit avec instanciation
 
 
-            // ===== Model instanced (nanosuit) =====
+        // ===== Model instanced (nanosuit) =====
         if (model_) {
             modelInstanceMatrices_.clear();
             modelInstanceMatrices_.reserve(modelInstanceCount_ * 16);
@@ -1476,7 +1517,9 @@ private:
 
                 // scale
                 float s = 0.5f;
-                M[0] = s; M[5] = s; M[10] = s;
+                M[0] = s;
+                M[5] = s;
+                M[10] = s;
 
                 // translation (col-major)
                 M[12] = target_[0] + std::cos(angle) * radius;
@@ -1499,7 +1542,7 @@ private:
             glUniformMatrix4fv(glGetUniformLocation(modelProgram_, "uProj"), 1, GL_FALSE, proj);
 
             model_->DrawInstanced(modelProgram_, modelInstanceCount_);
-            }
+        }
     }
 
     void checkShadowFBO() const {
@@ -1695,6 +1738,24 @@ uniform sampler2D gAlbedoSpec;
 uniform vec3 viewPos;
 uniform float specularPow;
 
+uniform samplerCube uSkybox;
+uniform float far;
+uniform mat4 invProj;
+uniform mat4 invViewRot;
+
+vec3 GetSkyDir(vec2 uv, vec3 viewPosition)
+    {
+        vec2 ndc = uv * 2.0 - 1.0;              // [-1,1]
+        vec4 clip = vec4(ndc, 1.0, 1.0);
+
+        vec4 viewRay = invProj * clip;
+        viewRay = vec4(viewRay.xy, -1.0, 0.0);              // direction en view-space
+
+        vec3 dirVS = normalize(viewRay.xyz);
+        vec3 dirWS = normalize((invViewRot * vec4(dirVS, 0.0)).xyz);
+        return dirWS;
+    }
+
 struct PointLight{
     vec3 position;
     vec3 color;
@@ -1708,6 +1769,7 @@ uniform PointLight pointLights[1];
 uniform int debugMode;
 
 void main(){
+
     // Mode debug: 0=normal, 1=positions, 2=normales, 3=albedo, 4=UV
     if(debugMode == 1) {
         // Afficher les positions (normalisées pour la visualisation)
@@ -1731,52 +1793,40 @@ void main(){
         return;
     }
 
-    // Lire les données du G-buffer
+      // Lire les données du G-buffer
     vec4 positionData = texture(gPosition, TexCoord);
-    vec4 normalData = texture(gNormal, TexCoord);
-    vec4 albedoSpecData = texture(gAlbedoSpec, TexCoord);
+    vec3 fragPos = positionData.rgb;
 
-    // DEBUG: Visualiser les buffers individuellement
-    //FragColor = positionData; // Visualiser les positions
-    //FragColor = normalData;   // Visualiser les normales
-    //FragColor = albedoSpecData; // Visualiser l'albedo
-    //return;
+    // SI c'est le fond (position ~ 0), afficher la skybox
+    if(length(fragPos) < 0.001) {
+        // Utiliser viewPos pour un calcul correct
+        vec3 rayDir = GetSkyDir(TexCoord, viewPos);
+        vec3 skyColor = texture(uSkybox, rayDir).rgb;
+        FragColor = vec4(skyColor, 1.0);
 
-    // Vérifier si c'est un pixel valide
-    if(positionData.a < 0.1) {
-        // C'est le fond
-        FragColor = vec4(0.1, 0.1, 0.15, 1.0);
+        // IMPORTANT: Définir une profondeur lointaine
+        gl_FragDepth = 0.9999; // Presque 1.0
         return;
     }
 
-    vec3 fragPos = positionData.rgb;
-    vec3 normal = normalize(normalData.rgb * 2.0 - 1.0); // [0,1] -> [-1,1]
-    vec3 albedo = albedoSpecData.rgb;
-    float specularStrength = albedoSpecData.a;
+    // Sinon, faire l'éclairage normal...
+    vec3 normal = normalize(texture(gNormal, TexCoord).rgb * 2.0 - 1.0);
+    vec3 albedo = texture(gAlbedoSpec, TexCoord).rgb;
+    float specularStrength = texture(gAlbedoSpec, TexCoord).a;
 
-    // DEBUG: Vérifier que l'albedo n'est pas noir
-     if(length(albedo) < 0.01) {
-         FragColor = vec4(1.0, 0.0, 0.0, 1.0); // Rouge si problème
-         return;
-     }
-
-    // Éclairage
+    // Éclairage (votre code existant)...
     vec3 viewDir = normalize(viewPos - fragPos);
-    vec3 lighting = albedo * 0.1; // Ambient
+    vec3 lighting = albedo * 0.1;
 
     for(int i = 0; i < pointLightCount; i++){
         vec3 lightDir = normalize(pointLights[i].position - fragPos);
-
-        // Diffuse
         float diff = max(dot(normal, lightDir), 0.0);
         vec3 diffuse = diff * albedo * pointLights[i].color;
 
-        // Specular (Blinn-Phong pour de meilleurs résultats)
         vec3 halfwayDir = normalize(lightDir + viewDir);
         float spec = pow(max(dot(normal, halfwayDir), 0.0), specularPow);
         vec3 specular = specularStrength * spec * pointLights[i].color;
 
-        // Attenuation
         float distance = length(pointLights[i].position - fragPos);
         float attenuation = 1.0 / (pointLights[i].constant +
                           pointLights[i].linear * distance +
@@ -1786,6 +1836,7 @@ void main(){
     }
 
     FragColor = vec4(lighting, 1.0);
+    gl_FragDepth = positionData.b/far;
 })";
 
         cubeProgram_ = createProgram(vs, fs);
@@ -2567,7 +2618,7 @@ void main(){
         glUniform1f(glGetUniformLocation(deferredProgram_, "specularPow"), 32.0f);
 
         // Lumière
-        glUniform1i(glGetUniformLocation(deferredProgram_, "debugMode"), 1);
+        glUniform1i(glGetUniformLocation(deferredProgram_, "debugMode"), 0);
 
         // Position de la lumière qui suit la caméra
         // float lightX = camX + 5.0f;
@@ -2588,6 +2639,10 @@ void main(){
         glUniform1f(glGetUniformLocation(deferredProgram_, "pointLights[0].constant"), 1.0f);
         glUniform1f(glGetUniformLocation(deferredProgram_, "pointLights[0].linear"), 0.09f);
         glUniform1f(glGetUniformLocation(deferredProgram_, "pointLights[0].quadratic"), 0.032f);
+
+        glActiveTexture(GL_TEXTURE5);
+        glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTex_);
+        glUniform1i(glGetUniformLocation(deferredProgram_, "uSkybox"), 5);
 
         // Rendu du quad plein écran
         glBindVertexArray(quadVAO_);
@@ -2751,7 +2806,7 @@ void main(){
 
         void main() {
             gPosition = vec4(vWorldPos, 1.0);
-            gNormal   = vec4(normalize(vWorldNormal), 1.0);
+            gNormal = vec4(normalize(vWorldNormal) * 0.5 + 0.5, 1.0);
 
             vec3 albedo = texture(texture_diffuse1, vUV).rgb;
 
@@ -2761,7 +2816,7 @@ void main(){
             gAlbedoSpec = vec4(albedo, 1.0);
         }
     )";
-        return createProgram(vertexSource,fragmentSource);
+        return createProgram(vertexSource, fragmentSource);
 
         GLuint vertexShader = compileShader(GL_VERTEX_SHADER, vertexSource);
         GLuint fragmentShader = compileShader(GL_FRAGMENT_SHADER, fragmentSource);
@@ -2787,47 +2842,27 @@ void main(){
     }
 
     void initGL() {
-        // Créer les shaders
+        // 1) créer shader modèle
         modelProgram_ = createModelShaderProgram();
 
-        // Configuration des textures dans le shader
-        glUseProgram(modelProgram_);
+        // 2) binder et set les samplers (IMPORTANT: tant que le program est actif)
         glUseProgram(modelProgram_);
         glUniform1i(glGetUniformLocation(modelProgram_, "texture_diffuse1"), 0);
-        glUseProgram(0);
-        // Définir les locations des textures
-        GLint diffuseLoc = glGetUniformLocation(modelProgram_, "texture_diffuse1");
-        GLint specularLoc = glGetUniformLocation(modelProgram_, "texture_specular1");
-
-        if (diffuseLoc >= 0) {
-            glUniform1i(diffuseLoc, 0); // Texture diffuse sur unité 0
-        }
-        if (specularLoc >= 0) {
-            glUniform1i(specularLoc, 1); // Texture specular sur unité 1
-        }
-
+        // Si ton FS n'utilise pas texture_specular1, tu peux enlever.
+        // glUniform1i(glGetUniformLocation(modelProgram_, "texture_specular1"), 1);
         glUseProgram(0);
 
-        // Initialiser les shaders de post-processing
+        // 3) post-processing
         initPostProcessingShaders();
 
-        // Configuration OpenGL de base
+        // 4) état GL de base
         glClearColor(0.05f, 0.05f, 0.08f, 1.0f);
         glEnable(GL_DEPTH_TEST);
         glDepthFunc(GL_LESS);
 
         glFrontFace(GL_CCW);
-        // Cacher les faces arrière
         glCullFace(GL_BACK);
         glEnable(GL_CULL_FACE);
-        // Sens antihoraire = face avant
-
-        // // Activer le blending pour la transparence
-        // glEnable(GL_BLEND);
-        // glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-        // glEnable(GL_CULL_FACE);
-        // glCullFace(GL_BACK);
     }
 
     void createSkyboxRessources() {
@@ -2849,10 +2884,10 @@ void main(){
         glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), (void *) 0);
         glBindVertexArray(0);
 
-        // 2) shaders skybox (inline, comme ton demo)
+        // 2) shaders skybox
         const std::string vs = R"(
-            #version 330 core
-            precision highp float;
+            #version 300 es
+            precision mediump float;
             layout (location = 0) in vec3 aPos;
             out vec3 TexCoords;
 
@@ -2872,7 +2907,7 @@ void main(){
         )";
 
         const std::string fs = R"(
-            #version 330 core
+            #version 300 es
             precision mediump float;
             precision mediump samplerCube;
             in vec3 TexCoords;
@@ -2881,19 +2916,23 @@ void main(){
             uniform samplerCube uSkybox;
 
             void main() {
-
                 FragColor = texture(uSkybox, TexCoords);
             }
         )";
+
         skyboxProgram_ = createProgram(vs, fs);
+
+        if (skyboxProgram_ == 0) {
+            std::cerr << "[ERROR] Skybox program creation failed!\n";
+            return;
+        }
+
         glUseProgram(skyboxProgram_);
         glUniform1i(glGetUniformLocation(skyboxProgram_, "uSkybox"), 0);
-
         glUseProgram(0);
 
-        // 3) chargement cubemap
-        // IMPORTANT : ordre standard cubemap OpenGL
-        // right, left, top, bottom, front, back
+        // 3) chargement cubemap - VÉRIFIER LES CHEMINS !
+        std::cout << "[Skybox] Attempting to load cubemap textures...\n";
         cubemapTex_ = loadCubemap({
             "data/assets/right.jpg",
             "data/assets/left.jpg",
@@ -2902,24 +2941,34 @@ void main(){
             "data/assets/front.jpg",
             "data/assets/back.jpg"
         });
+
+        if (cubemapTex_ == 0) {
+            std::cerr << "[ERROR] Failed to load cubemap textures!\n";
+            std::cerr << "[INFO] Ensure textures exist at: data/assets/{right,left,top,bottom,front,back}.jpg\n";
+        } else {
+            std::cout << "[SUCCESS] Cubemap loaded: " << cubemapTex_ << "\n";
+        }
     }
+
 
     void renderSkybox(float *view, float *proj) {
         if (!skyboxProgram_ || !cubemapTex_) return;
-        glDisable(GL_CULL_FACE);
-        glDepthFunc(GL_LEQUAL);  // Permettre à la skybox d'être au fond
+        //glDisable(GL_CULL_FACE);
+        glDepthFunc(GL_LEQUAL); // Permettre à la skybox d'être au fond
 
         glUseProgram(skyboxProgram_);
 
         // Passer les matrices sans translation
         float viewNoTranslation[16];
-        memcpy(viewNoTranslation,view,16 * sizeof(float));
-        viewNoTranslation[12]=0;
-        viewNoTranslation[13]=0;
-        viewNoTranslation[14]=0;
+        memcpy(viewNoTranslation, view, 16 * sizeof(float));
+        viewNoTranslation[12] = 0;
+        viewNoTranslation[13] = 0;
+        viewNoTranslation[14] = 0;
 
         glUniformMatrix4fv(glGetUniformLocation(skyboxProgram_, "uView"), 1, GL_FALSE, viewNoTranslation);
         glUniformMatrix4fv(glGetUniformLocation(skyboxProgram_, "uProj"), 1, GL_FALSE, proj);
+
+        //glUniform1f(glGetUniformLocation(skyboxProgram_, "uBrightness"), 2.f); // 1.5 = 50% plus clair
 
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_CUBE_MAP, cubemapTex_);
@@ -2927,7 +2976,7 @@ void main(){
         glDrawArrays(GL_TRIANGLES, 0, 36);
         glBindVertexArray(0);
         glDepthFunc(GL_LESS);
-        glEnable(GL_CULL_FACE);
+        //glEnable(GL_CULL_FACE);
     }
 
     static GLuint loadCubemap(const std::vector<std::string> &path) {
@@ -2945,23 +2994,32 @@ void main(){
         stbi_set_flip_vertically_on_load(false);
 
         int w, h, comp;
+        int loadedCount = 0;
         for (int i = 0; i < 6; i++) {
             unsigned char *data = stbi_load(path[i].c_str(), &w, &h, &comp, 0);
             if (!data) {
                 std::cerr << "[Skybox] FAILED to load: " << path[i]
                         << " | reason: " << stbi_failure_reason() << "\n";
+                continue; // ⚠️ Continue quand même pour voir les autres
             } else {
-                std::cout << "[Skybox] Loaded: " << path[i]
+                std::cout << "[Skybox] ✓ Loaded: " << path[i]
                         << " (" << w << "x" << h << ", comp=" << comp << ")\n";
+                loadedCount++;
             }
-            //GLenum format = (comp==4)? GL_RGBA:GL_RGB;
+
             GLenum format = GL_RGB;
             if (comp == 1) format = GL_RED;
             else if (comp == 3) format = GL_RGB;
             else if (comp == 4) format = GL_RGBA;
-            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, format, w, h, 0, format,GL_UNSIGNED_BYTE, data);
+
+            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, format, w, h, 0, format, GL_UNSIGNED_BYTE, data);
             stbi_image_free(data);
         }
+
+        if (loadedCount < 6) {
+            std::cerr << "[ERROR] Only " << loadedCount << "/6 textures loaded!\n";
+        }
+
         glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
         glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -2971,6 +3029,7 @@ void main(){
         glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
         return texID;
     }
+
 
     static GLuint compileShader(GLenum type, const std::string &source) {
         GLuint shader = glCreateShader(type);
