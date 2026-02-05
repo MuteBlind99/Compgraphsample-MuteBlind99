@@ -871,9 +871,9 @@ private:
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         // Désactiver l'écriture en profondeur pour la skybox
-        glDepthMask(GL_FALSE);  // <-- IMPORTANT
-        renderSkybox(view, proj);
-        glDepthMask(GL_TRUE);   // <-- Rétablir
+        //glDepthMask(GL_FALSE);  // <-- IMPORTANT
+        //renderSkybox(view, proj);
+        //glDepthMask(GL_TRUE);   // <-- Rétablir
 
         renderGeometryPass(view, proj);
 
@@ -947,7 +947,6 @@ private:
 
         // Lumière (comme dans votre ancien projet)
         glUniform1i(glGetUniformLocation(deferredProgram_, "pointLightCount"), 1);
-        glUniform1f(glGetUniformLocation(deferredProgram_,"far"),far );
 
         // Position de la lumière (animation)
         float lightAngle = time_ * 0.5f;
@@ -982,7 +981,8 @@ private:
         glBindVertexArray(quadVAO_);
         glDrawArrays(GL_TRIANGLES, 0, 6);
         glBindVertexArray(0);
-        //renderSkybox(view, proj);
+        glUniform1f(glGetUniformLocation(deferredProgram_,"far"),far );
+        renderSkybox(view, proj);
         glDisable(GL_DEPTH_TEST);
     }
 
@@ -1805,7 +1805,7 @@ void main(){
         FragColor = vec4(skyColor, 1.0);
 
         // IMPORTANT: Définir une profondeur lointaine
-        gl_FragDepth = 0.9999; // Presque 1.0
+        gl_FragDepth = 1.0; // Presque 1.0
         return;
     }
 
@@ -1836,7 +1836,7 @@ void main(){
     }
 
     FragColor = vec4(lighting, 1.0);
-    gl_FragDepth = positionData.b/far;
+    gl_FragDepth = viewPos.z;
 })";
 
         cubeProgram_ = createProgram(vs, fs);
@@ -2976,7 +2976,7 @@ void main(){
         glDrawArrays(GL_TRIANGLES, 0, 36);
         glBindVertexArray(0);
         glDepthFunc(GL_LESS);
-        //glEnable(GL_CULL_FACE);
+       //glEnable(GL_CULL_FACE);
     }
 
     static GLuint loadCubemap(const std::vector<std::string> &path) {
