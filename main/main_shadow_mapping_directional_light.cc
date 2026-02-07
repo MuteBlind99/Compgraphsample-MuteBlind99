@@ -120,89 +120,15 @@ public:
     void Update(float dt) override {
         time_ += dt;
 
-        // --- clavier ---
         const bool *keys = SDL_GetKeyboardState(nullptr);
-
-        // ---- TOGGLE TAB (anti-rebond) ----
-        bool tabDown = keys[SDL_SCANCODE_TAB];
-        if (tabDown && !tabWasDown_) {
-            SetMouseLook(!mouseLookEnabled_);
-        }
-        tabWasDown_ = tabDown;
-
-        // 1-9: changer effet de post-processing
-        for (int i = SDL_SCANCODE_1; i <= SDL_SCANCODE_9; i++) {
-            if (keys[i] && !keyWasDown_[i]) {
-                int effect = (i - SDL_SCANCODE_1) % (EFFECT_COUNT - 1) + 1;
-                currentEffect_ = static_cast<PostEffect>(effect);
-                std::cout << "Effet changé: " << effectNames_[currentEffect_] << std::endl;
-            }
-            keyWasDown_[i] = keys[i];
-        }
-
-        // 0: pas d'effet
-        if (keys[SDL_SCANCODE_0] && !keyWasDown_[SDL_SCANCODE_0]) {
-            currentEffect_ = EFFECT_NONE;
-            std::cout << "Effet: Aucun" << std::endl;
-        }
-        keyWasDown_[SDL_SCANCODE_0] = keys[SDL_SCANCODE_0];
-
-        // ESPACE: toggle bloom
-        if (keys[SDL_SCANCODE_SPACE] && !keyWasDown_[SDL_SCANCODE_SPACE]) {
-            useBloom_ = !useBloom_;
-            std::cout << "Bloom: " << (useBloom_ ? "ON" : "OFF") << std::endl;
-        }
-        keyWasDown_[SDL_SCANCODE_SPACE] = keys[SDL_SCANCODE_SPACE];
-
-        // F1-F4: Changer le mode de rendu
-        if (keys[SDL_SCANCODE_F1] && !keyWasDown_[SDL_SCANCODE_F1]) {
-            currentRenderMode_ = RENDER_DEFERRED;
-            std::cout << "Mode: Deferred Shading" << std::endl;
-        }
-        keyWasDown_[SDL_SCANCODE_F1] = keys[SDL_SCANCODE_F1];
-
-        if (keys[SDL_SCANCODE_F2] && !keyWasDown_[SDL_SCANCODE_F2]) {
-            currentRenderMode_ = RENDER_SHADOW_MAPPING;
-            std::cout << "Mode: Shadow Mapping" << std::endl;
-        }
-        keyWasDown_[SDL_SCANCODE_F2] = keys[SDL_SCANCODE_F2];
-
-        if (keys[SDL_SCANCODE_F3] && !keyWasDown_[SDL_SCANCODE_F3]) {
-            currentRenderMode_ = RENDER_SSAO;
-            std::cout << "Mode: SSAO" << std::endl;
-        }
-        keyWasDown_[SDL_SCANCODE_F3] = keys[SDL_SCANCODE_F3];
-
-        if (keys[SDL_SCANCODE_F4] && !keyWasDown_[SDL_SCANCODE_F4]) {
-            currentRenderMode_ = (currentRenderMode_ == RENDER_DEBUG_SHADOW)
-                                     ? RENDER_SHADOW_MAPPING
-                                     : RENDER_DEBUG_SHADOW;
-            std::cout << "Mode: Debug Shadow" << std::endl;
-        }
-        keyWasDown_[SDL_SCANCODE_F4] = keys[SDL_SCANCODE_F4];
-
-        if (keys[SDL_SCANCODE_F5] && !keyWasDown_[SDL_SCANCODE_F5]) {
-            currentRenderMode_ = (currentRenderMode_ == RENDER_DEBUG_SSAO) ? RENDER_SSAO : RENDER_DEBUG_SSAO;
-            std::cout << "Mode: Debug SSAO" << std::endl;
-        }
-        keyWasDown_[SDL_SCANCODE_F5] = keys[SDL_SCANCODE_F5];
+        handleMouseLookToggle(keys);
+        handlePostProcessingInput(keys);
+        handleRenderModeInput(keys);
 
         // ---- si la caméra est désactivée, on ne bouge pas ----
         if (!mouseLookEnabled_) return;
 
-
-        // --- souris (relative) ---
-        float mdx = 0.0f, mdy = 0.0f;
-        SDL_GetRelativeMouseState(&mdx, &mdy);
-
-        mdx *= mouseSensitivity_;
-        mdy *= mouseSensitivity_;
-
-        yaw_ += mdx;
-        pitch_ -= mdy;
-
-        if (pitch_ > maxPitch_) pitch_ = maxPitch_;
-        if (pitch_ < minPitch_) pitch_ = minPitch_;
+        updateCameraFromMouse();
     }
 
     void FixedUpdate() override {
@@ -274,6 +200,86 @@ public:
     }
 
 private:
+    void handleMouseLookToggle(const bool *keys) {
+        bool tabDown = keys[SDL_SCANCODE_TAB];
+        if (tabDown && !tabWasDown_) {
+            SetMouseLook(!mouseLookEnabled_);
+        }
+        tabWasDown_ = tabDown;
+    }
+
+    void handlePostProcessingInput(const bool *keys) {
+        for (int i = SDL_SCANCODE_1; i <= SDL_SCANCODE_9; i++) {
+            if (keys[i] && !keyWasDown_[i]) {
+                int effect = (i - SDL_SCANCODE_1) % (EFFECT_COUNT - 1) + 1;
+                currentEffect_ = static_cast<PostEffect>(effect);
+                std::cout << "Effet changé: " << effectNames_[currentEffect_] << std::endl;
+            }
+            keyWasDown_[i] = keys[i];
+        }
+
+        if (keys[SDL_SCANCODE_0] && !keyWasDown_[SDL_SCANCODE_0]) {
+            currentEffect_ = EFFECT_NONE;
+            std::cout << "Effet: Aucun" << std::endl;
+        }
+        keyWasDown_[SDL_SCANCODE_0] = keys[SDL_SCANCODE_0];
+
+        if (keys[SDL_SCANCODE_SPACE] && !keyWasDown_[SDL_SCANCODE_SPACE]) {
+            useBloom_ = !useBloom_;
+            std::cout << "Bloom: " << (useBloom_ ? "ON" : "OFF") << std::endl;
+        }
+        keyWasDown_[SDL_SCANCODE_SPACE] = keys[SDL_SCANCODE_SPACE];
+    }
+
+    void handleRenderModeInput(const bool *keys) {
+        if (keys[SDL_SCANCODE_F1] && !keyWasDown_[SDL_SCANCODE_F1]) {
+            currentRenderMode_ = RENDER_DEFERRED;
+            std::cout << "Mode: Deferred Shading" << std::endl;
+        }
+        keyWasDown_[SDL_SCANCODE_F1] = keys[SDL_SCANCODE_F1];
+
+        if (keys[SDL_SCANCODE_F2] && !keyWasDown_[SDL_SCANCODE_F2]) {
+            currentRenderMode_ = RENDER_SHADOW_MAPPING;
+            std::cout << "Mode: Shadow Mapping" << std::endl;
+        }
+        keyWasDown_[SDL_SCANCODE_F2] = keys[SDL_SCANCODE_F2];
+
+        if (keys[SDL_SCANCODE_F3] && !keyWasDown_[SDL_SCANCODE_F3]) {
+            currentRenderMode_ = RENDER_SSAO;
+            std::cout << "Mode: SSAO" << std::endl;
+        }
+        keyWasDown_[SDL_SCANCODE_F3] = keys[SDL_SCANCODE_F3];
+
+        if (keys[SDL_SCANCODE_F4] && !keyWasDown_[SDL_SCANCODE_F4]) {
+            currentRenderMode_ = (currentRenderMode_ == RENDER_DEBUG_SHADOW)
+                                     ? RENDER_SHADOW_MAPPING
+                                     : RENDER_DEBUG_SHADOW;
+            std::cout << "Mode: Debug Shadow" << std::endl;
+        }
+        keyWasDown_[SDL_SCANCODE_F4] = keys[SDL_SCANCODE_F4];
+
+        if (keys[SDL_SCANCODE_F5] && !keyWasDown_[SDL_SCANCODE_F5]) {
+            currentRenderMode_ = (currentRenderMode_ == RENDER_DEBUG_SSAO) ? RENDER_SSAO : RENDER_DEBUG_SSAO;
+            std::cout << "Mode: Debug SSAO" << std::endl;
+        }
+        keyWasDown_[SDL_SCANCODE_F5] = keys[SDL_SCANCODE_F5];
+    }
+
+    void updateCameraFromMouse() {
+        float mdx = 0.0f;
+        float mdy = 0.0f;
+        SDL_GetRelativeMouseState(&mdx, &mdy);
+
+        mdx *= mouseSensitivity_;
+        mdy *= mouseSensitivity_;
+
+        yaw_ += mdx;
+        pitch_ -= mdy;
+
+        if (pitch_ > maxPitch_) pitch_ = maxPitch_;
+        if (pitch_ < minPitch_) pitch_ = minPitch_;
+    }
+
     float time_ = 0.0f;
     float lightPos[3] = {3.0f, 3.0f, 3.0f};
     float camPos_[3] = {0.0f, 0.0f, 3.0f};
