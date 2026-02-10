@@ -4,16 +4,11 @@ project(GPR924-CompGraph)
 set (CMAKE_CXX_STANDARD 23)
 set (CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(CMAKE_TOOLCHAIN_FILE "C:/Users/forna/.vcpkg-clion/vcpkg/scripts/buildsystems/vcpkg.cmake")
-
 
 # Recherche des dépendances OpenGL
 find_package(OpenGL REQUIRED)
 # Recherche d'Assimp
 find_package(assimp CONFIG REQUIRED)
-
-# Définition pour STB_IMAGE
-#add_definitions(-DSTB_IMAGE_IMPLEMENTATION)
 
 include(cmake/data.cmake)
 include(cmake/shaders.cmake)
@@ -22,7 +17,13 @@ add_subdirectory(externals/GPR924-Engine)
 
 file(GLOB_RECURSE SRC_FILE src/*.cc include/*.h)
 
-add_library(CompGraphLib STATIC ${SRC_FILE})
+add_library(CompGraphLib STATIC ${SRC_FILE}
+        src/camera.cc
+        include/camera.h
+        src/light_manager.cc
+        include/light_manager.h
+        src/shadow_renderer.cc
+        include/shadow_renderer.h)
 target_include_directories(CompGraphLib PUBLIC
         include
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party
@@ -121,6 +122,20 @@ target_link_libraries(deferred_demo PUBLIC CompGraphLib assimp::assimp)
 add_executable(shadow_ssao_demo main/main_shadow_mapping_directional_light.cc
 src/model_loader.cc)
 target_link_libraries(shadow_ssao_demo PUBLIC CompGraphLib assimp::assimp)
+
+add_executable(3d_scene main/main_scene.cc
+        src/camera.cc
+        src/model_loader.cc
+        src/scene_manager.cc
+        src/light_manager.cc
+        src/shadow_renderer.cc
+        src/deferred_renderer.cc
+        src/ssao_renderer.cc
+        main/main_scene_refactor.cc)
+target_link_libraries(3d_scene PUBLIC CompGraphLib assimp::assimp)
+
+add_executable(scene_refactor main/main_scene_refactor.cc src/model_loader.cc)
+target_link_libraries(scene_refactor PUBLIC CompGraphLib assimp::assimp)
 # Option 2: Boucle automatique pour les autres fichiers main (sauf ceux déjà créés)
 
 # Liste des fichiers main déjà traités manuellement
@@ -143,7 +158,10 @@ foreach(main_file ${ALL_MAIN_FILES})
         add_executable(${target} ${main_file}
                 include/Shader.h
                 include/input.h
-                include/model_loader.h)
+                include/model_loader.h
+                src/Refactor/final_scene.cc
+                include/Refactor/final_scene.h
+                include/Refactor/Shaders.h)
         target_link_libraries(${target} PUBLIC CompGraphLib)
     endif()
 endforeach()

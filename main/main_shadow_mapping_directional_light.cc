@@ -2976,7 +2976,7 @@ void main(){
         glDrawArrays(GL_TRIANGLES, 0, 36);
         glBindVertexArray(0);
         glDepthFunc(GL_LESS);
-       //glEnable(GL_CULL_FACE);
+       // glEnable(GL_CULL_FACE);
     }
 
     static GLuint loadCubemap(const std::vector<std::string> &path) {
