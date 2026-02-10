@@ -101,7 +101,6 @@ StyleCopReport.xml
 *_h.h
 *.ilk
 *.meta
-*.obj
 *.idb
 *.iobj
 *.pch
@@ -457,7 +456,7 @@ cmake-build-*
 *.slo
 *.lo
 *.o
-*.obj
+
 
 # Precompiled Headers
 *.gch
